@@ -8,4 +8,7 @@ FSK FIFO bounds/CRC checks and bounded transmit completion handling. This copy
 is intended for this FSK profile, not as a general-purpose SX127x replacement.
 
 DejaVu Sans Mono and its license are included under fonts/.
-This project is independent of myenergi, ESPHome, LILYGO and Anker.
+This project is independent of myenergi, ESPHome and LILYGO.
+The harvi and zappi names are myenergi trademarks. References identify the
+devices/protocol targeted by this experimental implementation; no affiliation
+or endorsement is claimed.

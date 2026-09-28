@@ -1,5 +1,9 @@
 # Harvi Radio for ESPHome
 
+Independent community project; not affiliated with or endorsed by myenergi.
+References to harvi and zappi identify the devices and protocol targeted by this
+experimental implementation. They are not this project’s manufacturer or sponsor.
+
 A configurable Home Assistant radio gateway for the **LILYGO T3 LoRa32 V1.6.1
 (classic ESP32, SX1276, 868 MHz, 0.96-inch OLED)**. Works with power sensors from
 any Home Assistant integration, with no vendor-specific dependencies.
