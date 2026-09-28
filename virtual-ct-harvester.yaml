@@ -1,5 +1,5 @@
 # LILYGO T3 LoRa32 V1.6.1 / ESP32 + SX1276, 868 MHz variant.
-# Harvi commissioning gateway: passive discovery and user-started pairing.
+# Virtual CT Harvester commissioning gateway: passive discovery and user-started pairing.
 # Measurement transmission remains blocked until phase reference is solved.
 # Radio compatibility has not yet been verified over the air.
 external_components:
@@ -18,7 +18,7 @@ packages:
 
 esphome:
   name: !secret device_name
-  friendly_name: Harvi Radio
+  friendly_name: Virtual CT Harvester
   min_version: 2026.9.0
   on_boot:
     - priority: -100

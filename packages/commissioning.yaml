@@ -29,7 +29,7 @@ display:
     address: 0x3C
     update_interval: 1s
     lambda: |-
-      it.printf(0, 0, id(status_font), "Harvi %lu", (unsigned long) harvi::SERIAL);
+      it.print(0, 0, id(status_font), "Virtual CT Harvester");
       if (!id(wifi_connection).is_connected()) {
         it.print(0, 12, id(status_font), "Connect to setup WiFi");
         it.print(0, 24, id(status_font), "See device card");
@@ -41,8 +41,10 @@ display:
         it.print(0, 24, id(status_font), "Check board + pins");
         return;
       }
-      it.printf(0, 12, id(status_font), "%s", id(scan_state).active ? "Scanning..." :
-          id(pair_state).active ? "PAIRING - select me" : "Listening");
+      if (id(pair_state).active)
+        it.printf(0, 12, id(status_font), "Pair serial %lu", (unsigned long) harvi::SERIAL);
+      else
+        it.print(0, 12, id(status_font), id(scan_state).active ? "Scanning..." : "Listening");
       it.printf(0, 24, id(status_font), "RX %lu TX %lu", (unsigned long) id(rx_count),
                 (unsigned long) id(pair_state).sent);
       it.printf(0, 36, id(status_font), "Inputs: %s", id(power_inputs_recent).state ? "fresh" : "waiting/stale");
@@ -168,7 +170,7 @@ text_sensor:
     entity_category: diagnostic
     update_interval: never
   - platform: template
-    name: Virtual Harvi Serial
+    name: Device Serial
     entity_category: diagnostic
     update_interval: 60s
     lambda: return std::to_string(harvi::SERIAL);

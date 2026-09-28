@@ -22,8 +22,8 @@ def main():
     api_key = base64.b64encode(secrets.token_bytes(32)).decode()
     setup_password = secrets.token_hex(8)
     ota_password = secrets.token_hex(24)
-    name = f'harvi-{serial:06x}'
-    ssid = f'Harvi Setup {serial:06x}'
+    name = f'virtual-ct-harvester-{serial:06x}'
+    ssid = f'Virtual CT Harvester {serial:06x}'
     yaml = f'''# Private, unique to this device. Preserve across updates.
 device_name: "{name}"
 setup_ap_ssid: "{ssid}"
@@ -32,7 +32,7 @@ harvi_radio_api_key: "{api_key}"
 harvi_radio_ota_password: "{ota_password}"
 virtual_harvi_serial: {serial}
 '''
-    instructions = f'''Harvi Radio — private device setup card
+    instructions = f'''Virtual CT Harvester — private device setup card
 
 Virtual serial: {serial}
 Setup Wi-Fi: {ssid}

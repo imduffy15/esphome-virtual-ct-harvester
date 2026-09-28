@@ -1,8 +1,8 @@
-# Harvi Radio for ESPHome
+# Virtual CT Harvester for ESPHome
 
 Independent community project; not affiliated with or endorsed by myenergi.
-References to harvi and zappi identify the devices and protocol targeted by this
-experimental implementation. They are not this project’s manufacturer or sponsor.
+The harvi and zappi names identify myenergi products and the protocol targeted
+by this experimental implementation. Virtual CT Harvester is this project’s own name.
 
 A configurable Home Assistant radio gateway for the **LILYGO T3 LoRa32 V1.6.1
 (classic ESP32, SX1276, 868 MHz, 0.96-inch OLED)**. Works with power sensors from
@@ -19,7 +19,7 @@ or a replacement for your existing Grid CT.
 You need the device's private setup card, your 2.4 GHz Wi-Fi password and Home
 Assistant. Attach the 868 MHz antenna, then power the board with a USB cable.
 
-1. On your phone, join **Harvi Setup …** using the password on the setup card.
+1. On your phone, join **Virtual CT Harvester …** using the password on the setup card.
    The setup network appears when the device has no working Wi-Fi connection.
    If your phone says it has no internet, stay connected. Open **http://192.168.4.1**
    if the Wi-Fi setup page does not open automatically. Select your home network
@@ -91,8 +91,8 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 python prepare_device.py
-esphome compile harvi-radio.yaml
-esphome upload harvi-radio.yaml --device /dev/ttyUSB0
+esphome compile virtual-ct-harvester.yaml
+esphome upload virtual-ct-harvester.yaml --device /dev/ttyUSB0
 ```
 
 Replace the port with your board's port. The first build downloads the ESP32
@@ -102,6 +102,10 @@ it refuses to overwrite existing credentials. An optional `--serial NUMBER`
 selects a specific nonzero 24-bit identity distinct from your other devices.
 Never flash multiple units with the same generated secrets: prepare a separate
 working directory and setup card per unit. Preserve each unit's secrets for updates.
+
+Earlier checkouts used `harvi-radio.yaml`; the main file is now
+`virtual-ct-harvester.yaml`. Existing secrets remain compatible: keep the same keys,
+virtual serial and device name when updating an already configured unit.
 
 For ESPHome Device Builder, copy the YAML, packages, components, fonts and that
 unit's secrets into its configuration directory, retaining existing unrelated
