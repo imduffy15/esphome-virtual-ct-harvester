@@ -1,0 +1,13 @@
+secrets.yaml
+secrets.yml
+.env
+.env.*
+.venv/
+.esphome/
+__pycache__/
+*.pyc
+*.bin
+*.elf
+*.log
+.DS_Store
+device-card.txt

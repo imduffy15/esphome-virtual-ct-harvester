@@ -1,0 +1,217 @@
+globals:
+  - id: pair_state
+    type: harvi::Pairing
+  - id: scan_state
+    type: harvi::Scan
+  - id: input_freshness
+    type: harvi::InputFreshness
+  - id: stored_frequency
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  - id: valid_harvi_count
+    type: uint32_t
+    initial_value: '0'
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+
+font:
+  - file: fonts/DejaVuSansMono.ttf
+    id: status_font
+    size: 10
+
+display:
+  - platform: ssd1306_i2c
+    model: SSD1306 128x64
+    address: 0x3C
+    update_interval: 1s
+    lambda: |-
+      it.printf(0, 0, id(status_font), "Harvi %lu", (unsigned long) harvi::SERIAL);
+      if (!id(wifi_connection).is_connected()) {
+        it.print(0, 12, id(status_font), "Connect to setup WiFi");
+        it.print(0, 24, id(status_font), "See device card");
+        it.print(0, 36, id(status_font), "192.168.4.1");
+        return;
+      }
+      if (id(radio).is_failed()) {
+        it.print(0, 12, id(status_font), "RADIO FAILED");
+        it.print(0, 24, id(status_font), "Check board + pins");
+        return;
+      }
+      it.printf(0, 12, id(status_font), "%s", id(scan_state).active ? "Scanning..." :
+          id(pair_state).active ? "PAIRING - select me" : "Listening");
+      it.printf(0, 24, id(status_font), "RX %lu TX %lu", (unsigned long) id(rx_count),
+                (unsigned long) id(pair_state).sent);
+      it.printf(0, 36, id(status_font), "Inputs: %s", id(power_inputs_recent).state ? "fresh" : "waiting/stale");
+      it.printf(0, 48, id(status_font), "%s", id(device_ip).state.c_str());
+
+script:
+  - id: start_scan
+    then:
+      - lambda: |-
+          if (id(radio).is_failed()) return;
+          if (id(reference_serial).state == 0) {
+            id(gateway_status).publish_state("Select frequency; reference serial not configured");
+            return;
+          }
+          if (uint32_t(id(reference_serial).state) == harvi::SERIAL) {
+            id(gateway_status).publish_state("Reference serial must differ from this device");
+            return;
+          }
+          id(pair_state).stop();
+          id(scan_state).reference_serial = uint32_t(id(reference_serial).state);
+          id(scan_state).start(millis());
+          id(radio).set_frequency(harvi::FREQUENCIES[0]);
+          id(radio).configure();
+          id(receive_frequency).publish_state("869534852 Hz - candidate 1");
+          id(gateway_status).publish_state("Scanning for genuine Harvi");
+  - id: start_pairing
+    then:
+      - lambda: |-
+          if (id(radio).is_failed()) {
+            id(gateway_status).publish_state("Pairing blocked: radio failed");
+            return;
+          }
+          if (id(scan_state).active || id(stored_frequency) == 0) {
+            id(gateway_status).publish_state("Pairing blocked: find/select frequency");
+            return;
+          }
+          id(pair_state).start(millis());
+          id(gateway_status).publish_state("Pairing active: confirm serial " +
+              std::to_string(harvi::SERIAL) + " on Zappi");
+          ESP_LOGI("harvi", "Pairing serial=%lu for 120s; no CT readings advertised",
+                   (unsigned long) harvi::SERIAL);
+
+button:
+  - platform: template
+    name: Start Pairing
+    entity_category: config
+    on_press:
+      - script.execute: start_pairing
+  - platform: template
+    name: Stop Pairing
+    entity_category: config
+    on_press:
+      - lambda: |-
+          id(pair_state).stop();
+          id(gateway_status).publish_state("Listening; measurement TX blocked");
+  - platform: template
+    name: Find Genuine Harvi Channel
+    entity_category: config
+    on_press:
+      - script.execute: start_scan
+
+binary_sensor:
+  - platform: gpio
+    id: boot_button
+    internal: true
+    pin:
+      number: GPIO0
+      inverted: true
+      mode: INPUT_PULLUP
+    filters:
+      - delayed_on: 30ms
+      - delayed_off: 30ms
+    on_click:
+      min_length: 500ms
+      max_length: 3s
+      then:
+        - script.execute: start_pairing
+    on_multi_click:
+      - timing:
+          - ON for at least 10s
+        then:
+          - button.press: reset_device
+  - platform: template
+    id: power_inputs_recent
+    name: Power Inputs Recently Received
+    entity_category: diagnostic
+  - platform: template
+    name: Pairing Advertisements Active
+    entity_category: diagnostic
+    lambda: return id(pair_state).active;
+
+sensor:
+  - platform: template
+    name: Pairing Packets Sent
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 2s
+    lambda: return id(pair_state).sent;
+  - platform: template
+    name: Pairing Transmit Failures
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 2s
+    lambda: return id(pair_state).failed;
+  - platform: template
+    name: Valid Harvi Packets
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 2s
+    lambda: return id(valid_harvi_count);
+  - platform: template
+    name: Pairing Seconds Remaining
+    entity_category: diagnostic
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: return id(pair_state).seconds_left(millis());
+
+text_sensor:
+  - platform: template
+    id: gateway_status
+    name: Gateway Status
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: Virtual Harvi Serial
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return std::to_string(harvi::SERIAL);
+
+interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          if (id(radio).is_failed()) {
+            id(pair_state).stop(); id(scan_state).stop();
+            return;
+          }
+          const bool was_scanning = id(scan_state).active;
+          if (id(scan_state).advance(millis())) {
+            const auto index = id(scan_state).index;
+            const auto frequency = harvi::FREQUENCIES[index];
+            id(radio).set_frequency(frequency); id(radio).configure();
+            char option[64];
+            snprintf(option, sizeof(option), "%lu Hz - candidate %u", (unsigned long) frequency, unsigned(index+1));
+            id(receive_frequency).publish_state(option);
+          } else if (was_scanning && !id(scan_state).active) {
+            // A failed scan must not leave a previous stored frequency paired
+            // with a different actual receiver frequency.
+            id(stored_frequency) = 0;
+            id(gateway_status).publish_state("No reference found; select frequency or scan again");
+          }
+          const bool was_pairing = id(pair_state).active;
+          auto payload = id(pair_state).next(millis());
+          if (!payload.empty()) {
+            const auto result = id(radio).transmit_packet(payload);
+            const bool ok = result == esphome::sx127x::SX127xError::NONE;
+            id(pair_state).complete(ok);
+            if (!ok) id(gateway_status).publish_state("Pairing stopped: radio TX failure");
+          } else if (was_pairing && !id(pair_state).active) {
+            id(gateway_status).publish_state("Pairing window ended; check Zappi confirmation");
+          }
+  - interval: 1s
+    then:
+      - lambda: |-
+          id(power_inputs_recent).publish_state(id(input_freshness).fresh(millis(), uint32_t(id(input_timeout).state * 1000)));
+  - interval: 5s
+    then:
+      - lambda: |-
+          ESP_LOGI("harvi_inputs", "ms=%lu recent=%u input_1_w=%.1f input_2_w=%.1f input_3_w=%.1f",
+              (unsigned long) millis(), unsigned(id(power_inputs_recent).state),
+              id(power_input_1).state, id(power_input_2).state, id(power_input_3).state);

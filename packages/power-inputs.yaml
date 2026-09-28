@@ -1,0 +1,77 @@
+# Restore settings before native HA subscriptions are set up (priority 100).
+esphome:
+  on_boot:
+    - priority: 550
+      then:
+        - lambda: |-
+            id(active_scale_1) = id(source_1_units).current_option() == "kW" ? 1000.0f : 1.0f;
+            id(active_source_1) = id(source_1).state;
+            if (!harvi::valid_entity_id(id(active_source_1))) id(active_source_1).clear();
+            id(input_freshness).set_enabled(0, !id(active_source_1).empty());
+            if (id(active_source_1).empty()) id(active_source_1) = "sensor.unconfigured_input_1";
+            id(power_input_1).set_entity_id(id(active_source_1).c_str());
+            id(active_scale_2) = id(source_2_units).current_option() == "kW" ? 1000.0f : 1.0f;
+            id(active_source_2) = id(source_2).state;
+            if (!harvi::valid_entity_id(id(active_source_2))) id(active_source_2).clear();
+            id(input_freshness).set_enabled(1, !id(active_source_2).empty());
+            if (id(active_source_2).empty()) id(active_source_2) = "sensor.unconfigured_input_2";
+            id(power_input_2).set_entity_id(id(active_source_2).c_str());
+            id(active_scale_3) = id(source_3_units).current_option() == "kW" ? 1000.0f : 1.0f;
+            id(active_source_3) = id(source_3).state;
+            if (!harvi::valid_entity_id(id(active_source_3))) id(active_source_3).clear();
+            id(input_freshness).set_enabled(2, !id(active_source_3).empty());
+            if (id(active_source_3).empty()) id(active_source_3) = "sensor.unconfigured_input_3";
+            id(power_input_3).set_entity_id(id(active_source_3).c_str());
+globals:
+  - id: active_scale_1
+    type: float
+    initial_value: "1"
+  - id: active_source_1
+    type: std::string
+  - id: active_scale_2
+    type: float
+    initial_value: "1"
+  - id: active_source_2
+    type: std::string
+  - id: active_scale_3
+    type: float
+    initial_value: "1"
+  - id: active_source_3
+    type: std::string
+sensor:
+  - platform: homeassistant
+    id: power_input_1
+    entity_id: sensor.unconfigured_input_1
+    name: Power Input 1
+    internal: false
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    filters:
+      - lambda: return x * id(active_scale_1);
+    on_value:
+      - lambda: id(input_freshness).observe(0, millis(), x);
+  - platform: homeassistant
+    id: power_input_2
+    entity_id: sensor.unconfigured_input_2
+    name: Power Input 2
+    internal: false
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    filters:
+      - lambda: return x * id(active_scale_2);
+    on_value:
+      - lambda: id(input_freshness).observe(1, millis(), x);
+  - platform: homeassistant
+    id: power_input_3
+    entity_id: sensor.unconfigured_input_3
+    name: Power Input 3
+    internal: false
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    filters:
+      - lambda: return x * id(active_scale_3);
+    on_value:
+      - lambda: id(input_freshness).observe(2, millis(), x);
