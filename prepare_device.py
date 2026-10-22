@@ -9,7 +9,7 @@ import secrets
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--serial', type=int, help='Optional unique identity, 1..16777215')
+    parser.add_argument('--serial', type=int, help='Optional identity, 1..16777215, e.g. a retired genuine Harvi serial (see README)')
     args = parser.parse_args()
     serial = args.serial if args.serial is not None else secrets.randbelow(0xFFFFFF) + 1
     if not 1 <= serial <= 0xFFFFFF:

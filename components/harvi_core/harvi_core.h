@@ -660,6 +660,13 @@ class Scan {
     if (index==7) { active=false; return false; }
     ++index; entered_=now; matches_=0; return true;
   }
+  // Without a reference Harvi (none, or retired and its serial reused by this
+  // device), the channel is found from any Zappi's status broadcasts.
+  bool observe_zappi(const ZappiStatus &status) {
+    if (!active || reference_serial != 0 || !status.type) return false;
+    if (++matches_ >= 2) { found=true; active=false; return true; }
+    return false;
+  }
   bool observe(const Packet &packet) {
     if (!active || reference_serial == 0 || packet.serial != reference_serial) return false;
     // Distinct sequence values: repeated cached/duplicate packets cannot lock it.

@@ -38,8 +38,9 @@ Assistant. Attach the 868 MHz antenna, then power the board with a USB cable.
    entity's settings in HA. Select each source's **W** or **kW** unit. Leave unused
    inputs blank. Press **Apply Input Settings and Restart**, then refresh after
    the device reconnects. You can also edit these settings through HA.
-5. Check **Power Input 1/2/3** against the originals. kW inputs are converted to W;
-   positive and negative signs are preserved. Power Input N is sent as CTN; see
+5. Check **Power Input 1/2/3** against the originals. kW inputs are converted to W.
+   Signs are preserved unless you set **Power N Sign** to **Inverted**; see
+   [Virtual CT setup](#virtual-ct-setup) for the sign each CT needs. Power Input N is sent as CTN; see
    [Virtual CT setup](#virtual-ct-setup) for which input goes where. **Power Inputs Recently Received** indicates that all configured
    inputs delivered finite values within **Input Receipt Timeout** (120 seconds
    by default). This measures receipt age, not source measurement age. HA may not
@@ -50,11 +51,14 @@ stable virtual serial; retain the card for future setup and recovery.
 
 ## Radio reception and pairing test
 
-If you have a genuine Harvi, enter its serial under **Reference Harvi Serial**
-and press **Find Genuine Harvi Channel**. The scan takes up to 96 seconds and
-saves a frequency after two distinct packets from that Harvi. Alternatively,
-choose **Receive Frequency** manually. Candidate numbers are not verified Zappi
-channel labels. Your real Harvi needs enough CT current to power its transmitter.
+Press **Find Channel**. With **Reference Harvi Serial** left at 0, the scan locks
+onto the first channel carrying a Zappi's status broadcasts; it also runs at
+first boot. If a working genuine Harvi is still installed, enter its serial
+under **Reference Harvi Serial** first: the scan then waits for two distinct
+packets from that Harvi. Your real Harvi needs enough CT current to power its
+transmitter. The scan takes up to 96 seconds. Alternatively, choose **Receive
+Frequency** manually, for example if a neighbour's myenergi system is on another
+channel. Candidate numbers are not verified Zappi channel labels.
 
 Open **Linked Devices → Pairing** on Zappi. Press **Start Pairing** on the device's
 page or in HA. You can also hold and release BOOT for 0.5–3 seconds after startup.
@@ -71,7 +75,12 @@ Pairing advertises no CT readings. Measurements start only when you turn on
 | --- | --- | --- | --- |
 | Power 1 | CT1 | Grid | positive import, negative export |
 | Power 2 | CT2 | **Generation (required)** | positive generation |
-| Power 3 | CT3 | Storage, or any other type | Storage: positive charging, negative discharging |
+| Power 3 | CT3 | **AC Battery** (or Storage, or any other type) | battery: positive discharging, negative charging |
+
+myenergi CTs are positive when power flows towards the house. Many battery
+sensors report charging as positive (Anker SOLIX does, for example); set
+**Power 3 Sign** to **Inverted** for those. With the wrong sign, the myenergi app
+shows a charging battery as supplying the house and overstates the house load.
 
 1. Pair (above). On the Zappi, set this device's CT2 to **Generation** and
    CT1/CT3 as in the table. CT2 must be the **only** Generation CT on that
@@ -84,6 +93,47 @@ Pairing advertises no CT readings. Measurements start only when you turn on
 4. Once no other device has a Grid CT on the Zappi, turn on **Grid Total Is
    Virtual Only**. The grid total then adds a second feedback channel.
 5. Compare the Zappi's readings with your inputs, in both import and export.
+
+## Solar and battery in the myenergi app
+
+The app's energy-flow screen surrounds a leaf (the green-energy share) with
+bubbles. Every flow is drawn through the leaf. Grid, house and chargers always
+appear. The **solar** bubble appears only when a CT on the account has type
+Generation, and the **battery** bubble only when one has type **AC Battery**.
+Storage shows a separate storage icon, and Gen & Battery a combined one. These
+types come from the myenergi cloud, which learns them from the Zappi. That
+causes two traps:
+
+- **This device must be the only Harvi linked to the Zappi.** The Zappi reports
+  one Harvi's CT types per update: the first linked Harvi that has new data. A
+  genuine Harvi linked ahead of this device is nearly always reported instead.
+  This device's types then never reach the cloud, even though the Zappi uses
+  its readings. In one installation, about 3,000 consecutive uplinks all
+  carried the genuine Harvi.
+- **The serial must be one the cloud accepts.** The myenergi website rejected a
+  generated serial as invalid. Reusing a retired genuine Harvi's serial is
+  the verified route. A generated serial as the only Harvi has not been tested.
+
+To replace a genuine Harvi:
+
+1. Retire the genuine Harvi permanently. Unclip all of its CT clamps: it powers
+   itself from them. If both transmit the same serial, the Zappi mixes their
+   readings.
+2. On the Zappi, remove every Harvi from **Linked Devices**.
+3. Give this device the genuine Harvi's serial (printed on its label, and shown
+   on the Zappi's Linked Devices list). For a new unit, run
+   `python prepare_device.py --serial NUMBER`. For an existing unit, change
+   `virtual_harvi_serial` in its `secrets.yaml`, keeping the other values. Then
+   build and flash. Leave **Reference Harvi Serial** at 0.
+4. Pair and set the CT types as in [Virtual CT setup](#virtual-ct-setup).
+5. Check that the app shows solar and battery bubbles, and that the house
+   figure is roughly solar + grid import − battery charging − charger power.
+
+The Zappi accepts a linked serial from any transmitter: it keeps no pairing key,
+and in the firmware emulator it accepted backward and repeated packet sequences. Zappi CT type codes, as sent to the
+cloud: 0 None, 1 Grid, 2 Generation, 3 Storage, 4 Gen & Battery, 5 Internal
+Load, 6 Monitor, 7 AC Battery. Not analysed: whether the Zappi's own charging
+behaviour differs between Storage and AC Battery.
 
 ## How it works
 
@@ -165,7 +215,10 @@ Replace the port with your board's port. The first build downloads the ESP32
 build toolchain and web interface assets. The font and radio component are bundled.
 `prepare_device.py` creates unique `secrets.yaml` and a private `device-card.txt`;
 it refuses to overwrite existing credentials. An optional `--serial NUMBER`
-selects a specific nonzero 24-bit identity distinct from your other devices.
+selects a specific nonzero 24-bit identity. Use a retired genuine Harvi's serial to
+get the app's solar and battery bubbles (see
+[Solar and battery in the myenergi app](#solar-and-battery-in-the-myenergi-app)), and
+never one that another working device still transmits.
 Never flash multiple units with the same generated secrets: prepare a separate
 working directory and setup card per unit. Preserve each unit's secrets for updates.
 

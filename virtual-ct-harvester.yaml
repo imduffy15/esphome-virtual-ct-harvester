@@ -232,6 +232,11 @@ sx127x:
           // Do not expose them as actual measurements.
           harvi::ZappiStatus status;
           if (harvi::parse_zappi_status(x, status)) {
+            if (id(scan_state).observe_zappi(status)) {
+              id(stored_frequency) = harvi::FREQUENCIES[id(scan_state).index];
+              id(gateway_status).publish_state("Zappi found; ready for pairing");
+              ESP_LOGI("harvi", "Zappi broadcasts found at %lu Hz", (unsigned long) id(stored_frequency));
+            }
             // Learn our Zappi from the record it keeps for this virtual Harvi;
             // frames from neighbouring installations are ignored.
             if (status.type == 0x3730 && status.harvi_serial == harvi::SERIAL &&

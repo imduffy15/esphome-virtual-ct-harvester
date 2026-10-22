@@ -66,10 +66,6 @@ script:
     then:
       - lambda: |-
           if (id(radio).is_failed()) return;
-          if (id(reference_serial).state == 0) {
-            id(gateway_status).publish_state("Select frequency; reference serial not configured");
-            return;
-          }
           if (uint32_t(id(reference_serial).state) == harvi::SERIAL) {
             id(gateway_status).publish_state("Reference serial must differ from this device");
             return;
@@ -81,7 +77,8 @@ script:
           id(radio).set_frequency(harvi::FREQUENCIES[0]);
           id(radio).configure();
           id(receive_frequency).publish_state("869534852 Hz - candidate 1");
-          id(gateway_status).publish_state("Scanning for genuine Harvi");
+          id(gateway_status).publish_state(id(scan_state).reference_serial ?
+              "Scanning for genuine Harvi" : "Scanning for Zappi");
   - id: start_pairing
     then:
       - lambda: |-
@@ -114,7 +111,7 @@ button:
           id(pair_state).stop();
           id(gateway_status).publish_state("Listening");
   - platform: template
-    name: Find Genuine Harvi Channel
+    name: Find Channel
     entity_category: config
     on_press:
       - script.execute: start_scan
@@ -299,7 +296,7 @@ interval:
             // A failed scan must not leave a previous stored frequency paired
             // with a different actual receiver frequency.
             id(stored_frequency) = 0;
-            id(gateway_status).publish_state("No reference found; select frequency or scan again");
+            id(gateway_status).publish_state("Nothing found; select frequency or scan again");
           }
           const bool was_pairing = id(pair_state).active;
           auto payload = id(pair_state).next(millis());

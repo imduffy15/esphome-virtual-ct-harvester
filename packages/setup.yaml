@@ -149,3 +149,33 @@ select:
     initial_option: W
     set_action:
       - lambda: id(gateway_status).publish_state("Input settings changed; press Apply Input Settings and Restart");
+  - platform: template
+    id: source_1_sign
+    name: Power 1 Sign
+    entity_category: config
+    options: [As received, Inverted]
+    optimistic: true
+    restore_value: true
+    initial_option: As received
+    set_action:
+      - lambda: id(gateway_status).publish_state("Input settings changed; press Apply Input Settings and Restart");
+  - platform: template
+    id: source_2_sign
+    name: Power 2 Sign
+    entity_category: config
+    options: [As received, Inverted]
+    optimistic: true
+    restore_value: true
+    initial_option: As received
+    set_action:
+      - lambda: id(gateway_status).publish_state("Input settings changed; press Apply Input Settings and Restart");
+  - platform: template
+    id: source_3_sign
+    name: Power 3 Sign
+    entity_category: config
+    options: [As received, Inverted]
+    optimistic: true
+    restore_value: true
+    initial_option: As received
+    set_action:
+      - lambda: id(gateway_status).publish_state("Input settings changed; press Apply Input Settings and Restart");

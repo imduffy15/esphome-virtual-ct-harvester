@@ -4,19 +4,22 @@ esphome:
     - priority: 550
       then:
         - lambda: |-
-            id(active_scale_1) = id(source_1_units).current_option() == "kW" ? 1000.0f : 1.0f;
+            id(active_scale_1) = (id(source_1_units).current_option() == "kW" ? 1000.0f : 1.0f) *
+                (id(source_1_sign).current_option() == "Inverted" ? -1.0f : 1.0f);
             id(active_source_1) = id(source_1).state;
             if (!harvi::valid_entity_id(id(active_source_1))) id(active_source_1).clear();
             id(input_freshness).set_enabled(0, !id(active_source_1).empty());
             if (id(active_source_1).empty()) id(active_source_1) = "sensor.unconfigured_input_1";
             id(power_input_1).set_entity_id(id(active_source_1).c_str());
-            id(active_scale_2) = id(source_2_units).current_option() == "kW" ? 1000.0f : 1.0f;
+            id(active_scale_2) = (id(source_2_units).current_option() == "kW" ? 1000.0f : 1.0f) *
+                (id(source_2_sign).current_option() == "Inverted" ? -1.0f : 1.0f);
             id(active_source_2) = id(source_2).state;
             if (!harvi::valid_entity_id(id(active_source_2))) id(active_source_2).clear();
             id(input_freshness).set_enabled(1, !id(active_source_2).empty());
             if (id(active_source_2).empty()) id(active_source_2) = "sensor.unconfigured_input_2";
             id(power_input_2).set_entity_id(id(active_source_2).c_str());
-            id(active_scale_3) = id(source_3_units).current_option() == "kW" ? 1000.0f : 1.0f;
+            id(active_scale_3) = (id(source_3_units).current_option() == "kW" ? 1000.0f : 1.0f) *
+                (id(source_3_sign).current_option() == "Inverted" ? -1.0f : 1.0f);
             id(active_source_3) = id(source_3).state;
             if (!harvi::valid_entity_id(id(active_source_3))) id(active_source_3).clear();
             id(input_freshness).set_enabled(2, !id(active_source_3).empty());
