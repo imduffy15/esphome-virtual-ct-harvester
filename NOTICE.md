@@ -4,7 +4,9 @@ The SX127x component is based on ESPHome 2026.9.0:
 https://github.com/esphome/esphome/tree/2026.9.0/esphome/components/sx127x
 Its original MIT/Python and GPLv3/C++ license text is retained in
 components/sx127x/LICENSE. Local changes add IRQ timestamps, register diagnostics,
-FSK FIFO bounds/CRC checks and bounded transmit completion handling. This copy
+FSK FIFO bounds/CRC checks, bounded transmit completion handling, transmit at a
+scheduled microsecond, and a receiver profile (maximum LNA gain, AFC bandwidth
+equal to the channel filter). This copy
 is intended for this FSK profile, not as a general-purpose SX127x replacement.
 
 DejaVu Sans Mono and its license are included under fonts/.

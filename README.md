@@ -8,11 +8,13 @@ A configurable Home Assistant radio gateway for the **LILYGO T3 LoRa32 V1.6.1
 (classic ESP32, SX1276, 868 MHz, 0.96-inch OLED)**. Works with power sensors from
 any Home Assistant integration, with no vendor-specific dependencies.
 
-**Experimental commissioning build:** supports Wi-Fi setup, power input display,
-radio reception and manually started pairing advertisements. **Usable virtual CT
-measurements are not implemented.** Phase timing and calibration remain unfinished,
-and physical hardware/RF testing is pending. This is not yet a finished product
-or a replacement for your existing Grid CT.
+**Experimental:** pairs with a Zappi as a Harvi and sends three Home Assistant
+power readings as its CT1–CT3, with no extra hardware. The board has no mains
+reference; it infers the Zappi's mains phase from the Zappi's own radio
+broadcasts (see [How it works](#how-it-works)). It has been validated on one
+installation (single phase, 230 V, 50 Hz), including an overnight soak from
+export through 9 kW import. Treat it as experimental until you have checked
+its readings against your own meter.
 
 ## Set up a preflashed device
 
@@ -37,8 +39,8 @@ Assistant. Attach the 868 MHz antenna, then power the board with a USB cable.
    inputs blank. Press **Apply Input Settings and Restart**, then refresh after
    the device reconnects. You can also edit these settings through HA.
 5. Check **Power Input 1/2/3** against the originals. kW inputs are converted to W;
-   positive and negative signs are preserved. Input numbers do not assign CT roles
-   on Zappi. **Power Inputs Recently Received** indicates that all configured
+   positive and negative signs are preserved. Power Input N is sent as CTN; see
+   [Virtual CT setup](#virtual-ct-setup) for which input goes where. **Power Inputs Recently Received** indicates that all configured
    inputs delivered finite values within **Input Receipt Timeout** (120 seconds
    by default). This measures receipt age, not source measurement age. HA may not
    resend unchanged readings, so constant inputs can time out.
@@ -60,8 +62,71 @@ Select the virtual serial shown on the OLED/card and confirm it on Zappi.
 Advertisements stop after two minutes, on transmit failure, or when you press
 **Stop Pairing**. A sent counter alone does not confirm Zappi acceptance.
 
-This build advertises **no CT readings**. Keep its CT roles unused and retain your
-existing Grid measurement. Successful pairing does not enable measurement TX.
+Pairing advertises no CT readings. Measurements start only when you turn on
+**Virtual CT Output** (below).
+
+## Virtual CT setup
+
+| Input | Sent as | Set on the Zappi | Sign |
+| --- | --- | --- | --- |
+| Power 1 | CT1 | Grid | positive import, negative export |
+| Power 2 | CT2 | **Generation (required)** | positive generation |
+| Power 3 | CT3 | Storage, or any other type | Storage: positive charging, negative discharging |
+
+1. Pair (above). On the Zappi, set this device's CT2 to **Generation** and
+   CT1/CT3 as in the table. CT2 must be the **only** Generation CT on that
+   Zappi: its generation total is the board's phase feedback. Leave Power 2
+   blank if you have no generation; CT2 must still be set to Generation.
+2. Remove the Grid role from any other Grid CT, or the Zappi adds both.
+3. Turn on **Virtual CT Output**. Gateway Status shows *waiting for the Zappi to
+   list this serial*, then *acquiring phase*, then *phase locked, output live*.
+   Lock takes 10–45 s. The OLED shows `CT OUT - LOCKED`.
+4. Once no other device has a Grid CT on the Zappi, turn on **Grid Total Is
+   Virtual Only**. The grid total then adds a second feedback channel.
+5. Compare the Zappi's readings with your inputs, in both import and export.
+
+## How it works
+
+The Zappi computes `power = V × floor(|phasor| / 1.19) × cos(angle − its mains
+phase)` for each CT. So each reading has to be rotated to the Zappi's mains
+phase at the moment the packet arrives.
+
+- **Feedback:** the Zappi broadcasts its grid and generation totals over RF once
+  a second. The board learns its own Zappi from the record that lists this
+  virtual serial. Frames from neighbouring installations are ignored.
+- **Pilot:** CT2 always carries an extra 300 W at 90° ± 3° to its measurement.
+  When locked, this shifts the generation reading by about ±16 W. Any phase
+  error shows up in the generation total, so the loop stays observable at
+  night.
+- **Acquisition:** a least-squares fit over mains frequency, using golden-angle
+  phase steps. **Tracking:** a Kalman filter on phase and frequency.
+- **Timing:** one packet 450 ms after each heard total, in a quiet slot. The
+  radio driver starts transmitting at a scheduled microsecond, so the angle is
+  computed for the exact send time.
+
+## Safety behaviour
+
+- CT1 and CT3 are sent **only while the phase is locked**. Otherwise they are
+  omitted, and the Zappi reads 0. A reading at an unknown phase is never sent.
+- After a short lock loss, readings continue on the last good phase for up to
+  15 s while its uncertainty stays under 25° (`CT OUT - HOLDING`). Then they are
+  withheld.
+- While acquiring, CT2 carries only the pilot, so it reads within ±300 W.
+- If a configured input has no finite value since the HA connection
+  (re)started, all measurements are withheld and the pilot keeps the lock.
+  An unconfigured input is sent as 0 W.
+- If the board stops transmitting, the Zappi holds the last values for at least
+  34 s, then clears them.
+- Airtime: about 4 ms per packet, one packet every 1–3 s, at 2 dBm.
+- Residual risk: lock is inferred, not measured against mains. A source that
+  freezes in HA without going unavailable keeps being sent. Re-check the Grid
+  reading after any firmware change before relying on it for charging control.
+
+Weak reception of the Zappi's broadcasts is the main cause of lock loss.
+Keep the antenna vertical and clear of inverters and metal enclosures.
+Diagnostics: **Phase Locked**, **Phase Uncertainty**, **Phase Fit Gain** (≈ 1.00
+when the scaling is right), **Virtual CT Held Packets**, **Radio Noise Floor**,
+**Receiver Restarts** and **Zappi Serial**.
 
 ## Recovery
 
@@ -124,6 +189,6 @@ only for build validation and must not be used for real devices.
 Use the classic ESP32/SX1276 868 MHz board above. SX1262, ESP32-S3 and 433 MHz
 variants need different support. The radio uses **FSK**, not LoRa. GPIO5 is a
 manufacturer-wired strapping pin; avoid adding loads to it during startup. No SD
-card is needed. Radio advertisements use 2 dBm, one small packet every two seconds.
+card is needed. All transmissions use 2 dBm.
 
 [Licenses and third-party notices](NOTICE.md).

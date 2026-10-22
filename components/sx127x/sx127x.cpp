@@ -203,6 +203,11 @@ void SX127x::configure_fsk_ook_() {
   this->write_register_(REG_OOK_PEAK, bitsync | OOK_THRESH_STEP_0_5 | OOK_THRESH_PEAK);
   this->write_register_(REG_OOK_AVG, OOK_AVG_RESERVED | OOK_THRESH_DEC_1_8);
 
+  // Harvi profile: LNA max gain with HF boost (RegLna), and the AFC filter as
+  // wide as the channel filter (RegAfcBw) so the short preamble is not cut.
+  this->write_register_(0x0C, 0x23);
+  this->write_register_(0x13, BW_FSK_OOK[this->bandwidth_]);
+
   // set rx floor
   this->write_register_(REG_OOK_FIX, 256 + int(this->rx_floor_ * 2.0f));
   this->write_register_(REG_RSSI_THRESH, std::abs(int(this->rx_floor_ * 2.0f)));
@@ -260,6 +265,15 @@ size_t SX127x::get_max_packet_size() {
 }
 
 SX127xError SX127x::transmit_packet(const std::vector<uint8_t> &packet) {
+  return this->transmit_(packet, false, 0);
+}
+
+SX127xError SX127x::transmit_packet_at(const std::vector<uint8_t> &packet, uint32_t at_us) {
+  if (this->modulation_ == MOD_LORA) return SX127xError::INVALID_PARAMS;
+  return this->transmit_(packet, true, at_us);
+}
+
+SX127xError SX127x::transmit_(const std::vector<uint8_t> &packet, bool scheduled, uint32_t at_us) {
   if (this->is_failed()) return SX127xError::INVALID_PARAMS;
   if (this->payload_length_ > 0 && this->payload_length_ != packet.size()) {
     ESP_LOGE(TAG, "Packet size does not match config");
@@ -293,6 +307,20 @@ SX127xError SX127x::transmit_packet(const std::vector<uint8_t> &packet) {
       this->write_register_(REG_FIFO, packet.size());
     }
     this->write_fifo_(packet);
+    if (scheduled) {
+      while (int32_t(micros() - at_us) < 0) {
+      }
+      if (int32_t(micros() - at_us) > 100) {
+        // Never send a phase-stamped payload late: flush FIFO and resume RX.
+        this->write_register_(0x3F, 0x10);
+        if (this->rx_start_) this->set_mode_rx();
+        return SX127xError::LATE;
+      }
+    }
+    const uint32_t trigger = micros();
+    this->write_register_(REG_OP_MODE, this->modulation_ | MODE_TX);
+    this->last_tx_write_us_ = micros() - trigger;
+    this->last_tx_us_ = trigger;
     this->set_mode_tx();
   }
 

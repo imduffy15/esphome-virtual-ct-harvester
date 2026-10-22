@@ -3,6 +3,8 @@ globals:
     type: harvi::Pairing
   - id: scan_state
     type: harvi::Scan
+  - id: virtual_ct
+    type: harvi::VirtualCT
   - id: input_freshness
     type: harvi::InputFreshness
   - id: stored_frequency
@@ -44,11 +46,20 @@ display:
       if (id(pair_state).active)
         it.printf(0, 12, id(status_font), "Pair serial %lu", (unsigned long) harvi::SERIAL);
       else
-        it.print(0, 12, id(status_font), id(scan_state).active ? "Scanning..." : "Listening");
+        it.print(0, 12, id(status_font), id(scan_state).active ? "Scanning..." :
+            id(virtual_ct).active ? (id(virtual_ct).locked() ? "CT OUT - LOCKED" :
+                                     id(virtual_ct).riding() ? "CT OUT - HOLDING" :
+                                     "CT OUT - ACQUIRING") : "Listening");
       it.printf(0, 24, id(status_font), "RX %lu TX %lu", (unsigned long) id(rx_count),
-                (unsigned long) id(pair_state).sent);
-      it.printf(0, 36, id(status_font), "Inputs: %s", id(power_inputs_recent).state ? "fresh" : "waiting/stale");
-      it.printf(0, 48, id(status_font), "%s", id(device_ip).state.c_str());
+                (unsigned long) (id(pair_state).sent + id(virtual_ct).sent));
+      it.printf(0, 36, id(status_font), "Inputs: %s", id(input_freshness).usable() ? "ok" : "waiting");
+      if (id(virtual_ct).active && id(zappi_device) < 0)
+        it.print(0, 48, id(status_font), "Zappi: not heard");
+      else if (id(virtual_ct).active)
+        it.printf(0, 48, id(status_font), "obs %lu sd %.0f", (unsigned long) id(virtual_ct).observations,
+                  id(virtual_ct).tracker().tracking() ? id(virtual_ct).tracker().phase_sigma_deg() : 0.0);
+      else
+        it.printf(0, 48, id(status_font), "%s", id(device_ip).state.c_str());
 
 script:
   - id: start_scan
@@ -64,6 +75,7 @@ script:
             return;
           }
           id(pair_state).stop();
+          id(virtual_ct).stop();
           id(scan_state).reference_serial = uint32_t(id(reference_serial).state);
           id(scan_state).start(millis());
           id(radio).set_frequency(harvi::FREQUENCIES[0]);
@@ -81,6 +93,7 @@ script:
             id(gateway_status).publish_state("Pairing blocked: find/select frequency");
             return;
           }
+          id(virtual_ct).stop();
           id(pair_state).start(millis());
           id(gateway_status).publish_state("Pairing active: confirm serial " +
               std::to_string(harvi::SERIAL) + " on Zappi");
@@ -99,12 +112,36 @@ button:
     on_press:
       - lambda: |-
           id(pair_state).stop();
-          id(gateway_status).publish_state("Listening; measurement TX blocked");
+          id(gateway_status).publish_state("Listening");
   - platform: template
     name: Find Genuine Harvi Channel
     entity_category: config
     on_press:
       - script.execute: start_scan
+
+switch:
+  # Continuous virtual CT output. CT1 and CT3 are only sent while the phase is
+  # locked; CT2 (Generation on the Zappi) always carries the quadrature pilot.
+  - platform: template
+    id: virtual_ct_output
+    name: Virtual CT Output
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - lambda: ESP_LOGW("harvi", "Virtual CT output enabled");
+    on_turn_off:
+      - lambda: |-
+          id(virtual_ct).stop();
+          id(gateway_status).publish_state("Virtual CT output off");
+  # Enable only when no other device's Grid CT is assigned on the Zappi: the
+  # grid total then reflects this virtual Harvi alone and adds phase feedback.
+  - platform: template
+    id: grid_feedback
+    name: Grid Total Is Virtual Only
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
 
 binary_sensor:
   - platform: gpio
@@ -135,6 +172,14 @@ binary_sensor:
     name: Pairing Advertisements Active
     entity_category: diagnostic
     lambda: return id(pair_state).active;
+  - platform: template
+    name: Phase Locked
+    entity_category: diagnostic
+    lambda: return id(virtual_ct).locked();
+  - platform: template
+    name: Virtual CT Active
+    entity_category: diagnostic
+    lambda: return id(virtual_ct).active;
 
 sensor:
   - platform: template
@@ -162,6 +207,65 @@ sensor:
     accuracy_decimals: 0
     update_interval: 1s
     lambda: return id(pair_state).seconds_left(millis());
+  - platform: template
+    name: Virtual CT Packets Sent
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 2s
+    lambda: return id(virtual_ct).sent;
+  - platform: template
+    name: Virtual CT Transmit Failures
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 2s
+    lambda: return id(virtual_ct).failed;
+  - platform: template
+    name: Virtual CT Held Packets
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: return id(virtual_ct).ride_packets;
+  - platform: template
+    name: Virtual CT Late Packets
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: return id(virtual_ct).late;
+  - platform: template
+    name: Phase Ambiguous Reports
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: return id(virtual_ct).ambiguous;
+  - platform: template
+    name: Phase Observations
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: return id(virtual_ct).observations;
+  - platform: template
+    name: Phase Uncertainty
+    entity_category: diagnostic
+    unit_of_measurement: "°"
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: |-
+      return id(virtual_ct).tracker().tracking() ? id(virtual_ct).tracker().phase_sigma_deg() : NAN;
+  - platform: template
+    name: Tracked Mains Frequency
+    entity_category: diagnostic
+    unit_of_measurement: Hz
+    accuracy_decimals: 4
+    update_interval: 5s
+    lambda: |-
+      return id(virtual_ct).tracker().tracking() ? id(virtual_ct).tracker().frequency_hz() : NAN;
+  - platform: template
+    name: Phase Fit Gain
+    entity_category: diagnostic
+    accuracy_decimals: 3
+    update_interval: 5s
+    lambda: |-
+      return id(virtual_ct).fit().valid ? id(virtual_ct).fit().gain : NAN;
 
 text_sensor:
   - platform: template
@@ -176,11 +280,11 @@ text_sensor:
     lambda: return std::to_string(harvi::SERIAL);
 
 interval:
-  - interval: 100ms
+  - interval: 20ms
     then:
       - lambda: |-
           if (id(radio).is_failed()) {
-            id(pair_state).stop(); id(scan_state).stop();
+            id(pair_state).stop(); id(virtual_ct).stop(); id(scan_state).stop();
             return;
           }
           const bool was_scanning = id(scan_state).active;
@@ -207,8 +311,63 @@ interval:
           } else if (was_pairing && !id(pair_state).active) {
             id(gateway_status).publish_state("Pairing window ended; check Zappi confirmation");
           }
+          // Receiver watchdog: the Zappi broadcasts every second, so after 10 s
+          // of silence restart RX in case the SX1276 receiver is wedged.
+          if (!id(scan_state).active && uint32_t(millis() - id(last_rx_ms)) > 10000) {
+            id(last_rx_ms) = millis();
+            ++id(rx_restarts);
+            ESP_LOGD("harvi_rx", "No packets for 10 s; restarting receiver");
+            id(radio).set_mode_standby();
+            id(radio).set_mode_rx();
+          }
+          id(virtual_ct).grid_ct = id(grid_feedback).state ? 0 : -1;
+          if (id(virtual_ct_output).state && !id(virtual_ct).active && !id(pair_state).active &&
+              !id(scan_state).active && id(stored_frequency) != 0) {
+            id(virtual_ct).start(millis());
+            id(gateway_status).publish_state("Virtual CT: acquiring phase");
+          }
+          // Power Input N is sent as CTN. An unconfigured input is sent as 0 W;
+          // a configured one without a usable value withholds all measurements.
+          auto input = [](bool configured, float value) { return configured ? value : 0.0f; };
+          uint32_t at_us = 0;
+          auto ct_payload = id(virtual_ct).next(
+              millis(), micros(),
+              input(id(input_freshness).enabled(0), id(power_input_1).state),
+              input(id(input_freshness).enabled(1), id(power_input_2).state),
+              input(id(input_freshness).enabled(2), id(power_input_3).state),
+              id(input_freshness).usable(), at_us);
+          if (!ct_payload.empty()) {
+            const auto result = id(radio).transmit_packet_at(ct_payload, at_us);
+            const bool ok = result == esphome::sx127x::SX127xError::NONE;
+            const bool late = result == esphome::sx127x::SX127xError::LATE;
+            id(virtual_ct).complete(ok, late, id(radio).get_last_tx_us());
+            if (ok) {
+              const auto &s = id(virtual_ct).last_sent();
+              ESP_LOGI("harvi_tx", "t_us=%lu write_us=%lu rot=%u out=%u ride=%u v_dv=%u a=%.1f,%.1f,%.1f m=%.0f,%.0f,%.0f",
+                       (unsigned long) s.t_us, (unsigned long) id(radio).get_last_tx_write_us(), unsigned(s.rotated),
+                       unsigned(s.output), unsigned(s.riding),
+                       id(virtual_ct).voltage_dv(), s.angle_deg[0], s.angle_deg[1], s.angle_deg[2],
+                       s.magnitude_w[0], s.magnitude_w[1], s.magnitude_w[2]);
+            } else if (!late) {
+              id(gateway_status).publish_state("Virtual CT stopped: radio TX failure");
+            }
+          }
   - interval: 1s
     then:
+      - lambda: |-
+          static int last = -1;
+          const int now = !id(virtual_ct).active ? 0 : id(zappi_device) < 0 ? 5 :
+                          id(virtual_ct).invalid_input() ? 1 :
+                          id(virtual_ct).locked() ? 2 : id(virtual_ct).riding() ? 4 : 3;
+          if (now != last && id(virtual_ct).active) {
+            static const char *const text[] = {"", "Virtual CT: inputs unavailable, measurements withheld",
+                                               "Virtual CT: phase locked, output live",
+                                               "Virtual CT: acquiring phase, CT1/CT3 withheld",
+                                               "Virtual CT: re-locking, output held on last phase",
+                                               "Virtual CT: waiting for the Zappi to list this serial"};
+            id(gateway_status).publish_state(text[now]);
+          }
+          last = now;
       - lambda: |-
           id(power_inputs_recent).publish_state(id(input_freshness).fresh(millis(), uint32_t(id(input_timeout).state * 1000)));
   - interval: 5s

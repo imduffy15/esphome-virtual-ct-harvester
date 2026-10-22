@@ -71,8 +71,11 @@ text_sensor:
       entity_category: diagnostic
   - platform: template
     name: Measurement Status
-    update_interval: 60s
-    lambda: return {"CT measurements disabled; reception and pairing tests only"};
+    update_interval: 5s
+    lambda: |-
+      return {!id(virtual_ct_output).state ? "Virtual CT output off" :
+              id(virtual_ct).locked() ? "CT1-CT3 live" :
+              id(virtual_ct).riding() ? "CT1-CT3 held on last phase" : "CT1/CT3 withheld until phase lock"};
 
 text:
   - platform: template

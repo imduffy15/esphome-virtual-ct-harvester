@@ -1,7 +1,7 @@
 # LILYGO T3 LoRa32 V1.6.1 / ESP32 + SX1276, 868 MHz variant.
-# Virtual CT Harvester commissioning gateway: passive discovery and user-started pairing.
-# Measurement transmission remains blocked until phase reference is solved.
-# Radio compatibility has not yet been verified over the air.
+# Virtual CT Harvester: pairing, plus three Home Assistant power inputs sent as
+# CT1-CT3 with the Zappi's mains phase tracked in closed loop from its own RF
+# status broadcasts. Radio profile, pairing and CT output verified over the air.
 external_components:
   - source:
       type: local
@@ -43,7 +43,7 @@ esphome:
                          (unsigned long) id(stored_frequency), unsigned(i+1));
                 id(receive_frequency).publish_state(option);
               }
-              id(gateway_status).publish_state("Listening; measurement TX blocked");
+              id(gateway_status).publish_state("Listening");
             }
 
 esp32:
@@ -84,6 +84,21 @@ globals:
   - id: rx_count
     type: uint32_t
     initial_value: '0'
+  - id: last_rx_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: rx_restarts
+    type: uint32_t
+    initial_value: '0'
+  # Device byte of the Zappi that lists this virtual Harvi (-1: not yet heard).
+  - id: zappi_device
+    type: int16_t
+    restore_value: true
+    initial_value: '-1'
+  - id: zappi_serial
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
 
 # Candidate frequencies, not verified channel assignments. Default is index 1.
 # A string selector avoids single-precision float rounding at 869 MHz.
@@ -108,12 +123,13 @@ select:
       - lambda: |-
           id(scan_state).stop();
           id(pair_state).stop();
+          id(virtual_ct).stop();
           const uint32_t frequency = strtoul(x.c_str(), nullptr, 10);
           id(stored_frequency) = frequency;
           id(radio).set_frequency(frequency);
           id(radio).configure();
           ESP_LOGI("harvi_rx", "Receiver retuned to %lu Hz", (unsigned long) frequency);
-          id(gateway_status).publish_state("Listening; measurement TX blocked");
+          id(gateway_status).publish_state("Listening");
 
 sensor:
   - platform: template
@@ -126,6 +142,23 @@ sensor:
   - platform: uptime
     name: Uptime
     entity_category: diagnostic
+  - platform: template
+    name: Receiver Restarts
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: return id(rx_restarts);
+  # SX1276 FSK RegRssiValue: -value/2 dBm. Sampled between packets it shows
+  # the channel noise floor.
+  - platform: template
+    name: Radio Noise Floor
+    entity_category: diagnostic
+    unit_of_measurement: dBm
+    accuracy_decimals: 1
+    update_interval: 2s
+    lambda: |-
+      if (id(radio).is_failed()) return NAN;
+      return -0.5f * id(radio).diagnostic_register(0x11);
 
 text_sensor:
   - platform: template
@@ -138,6 +171,12 @@ text_sensor:
     name: Last Candidate Harvi Packet
     entity_category: diagnostic
     update_interval: never
+  - platform: template
+    name: Zappi Serial
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      return id(zappi_serial) ? std::to_string(id(zappi_serial)) : std::string("not heard yet");
 
 sx127x:
   id: radio
@@ -157,10 +196,11 @@ sx127x:
   sync_value: [0x69, 0x81, 0x7e, 0x96]
   preamble_size: 3
   preamble_detect: 2
-  preamble_errors: 0
+  preamble_errors: 10
   preamble_polarity: 0xAA
   rx_start: true
-  # Only user-started pairing transmits: 2 dBm, one small packet per 2 seconds.
+  # 2 dBm. Pairing: one packet per 2 s for 120 s. Virtual CT: one ~4 ms packet
+  # per heard Zappi status (about one per 1-3 s).
   pa_pin: BOOST
   pa_power: 2
   on_packet:
@@ -170,6 +210,7 @@ sx127x:
           // ISR edge time is a radio event, NOT a mains phase reference.
           if (x.empty() || x.size() > 63) return;
           ++id(rx_count);
+          id(last_rx_ms) = millis();
           char hex[129];
           static const char digits[] = "0123456789abcdef";
           hex[0] = digits[x.size() >> 4];
@@ -189,6 +230,41 @@ sx127x:
           ESP_LOGI("harvi_rx", "%s", record);
           // FSK RSSI/SNR arguments are both dummy zero in ESPHome 2026.9.0.
           // Do not expose them as actual measurements.
+          harvi::ZappiStatus status;
+          if (harvi::parse_zappi_status(x, status)) {
+            // Learn our Zappi from the record it keeps for this virtual Harvi;
+            // frames from neighbouring installations are ignored.
+            if (status.type == 0x3730 && status.harvi_serial == harvi::SERIAL &&
+                (status.device != id(zappi_device) || status.zappi_serial != id(zappi_serial))) {
+              id(zappi_device) = status.device;
+              id(zappi_serial) = status.zappi_serial;
+              ESP_LOGI("harvi", "Zappi %lu (device byte 0x%02x) lists this virtual Harvi",
+                       (unsigned long) status.zappi_serial, status.device);
+            }
+            if (status.device != id(zappi_device)) return;
+            const uint32_t rx_us = id(radio).get_last_irq_us();
+            const bool observed = id(virtual_ct).on_status(status, rx_us);
+            if (status.type == 0x3601) {
+              ESP_LOGI("harvi_zappi", "rx_us=%lu grid_w=%ld gen_w=%ld", (unsigned long) rx_us,
+                       (long) status.grid_w, (long) status.generation_w);
+            } else if (status.type == 0x5a5a) {
+              ESP_LOGI("harvi_zappi", "rx_us=%lu v_dv=%u f_chz=%u", (unsigned long) rx_us,
+                       status.voltage_dv, status.frequency_chz);
+            } else if (status.type == 0x3730) {
+              ESP_LOGI("harvi_zappi", "rx_us=%lu harvi=%lu p=%d,%d,%d i=%d,%d,%d", (unsigned long) rx_us,
+                       (unsigned long) status.harvi_serial, status.ct_power_w[0], status.ct_power_w[1],
+                       status.ct_power_w[2], status.ct_current_ca[0], status.ct_current_ca[1], status.ct_current_ca[2]);
+            }
+            if (observed) {
+              const auto &t = id(virtual_ct).tracker();
+              const auto &f = id(virtual_ct).fit();
+              ESP_LOGI("harvi_pll", "obs=%lu locked=%u tracking=%u sd=%.1f nis=%.2f f=%.4f fit_n=%u fit_f=%.4f fit_gain=%.3f fit_rel=%.3f",
+                       (unsigned long) id(virtual_ct).observations, unsigned(id(virtual_ct).locked()),
+                       unsigned(t.tracking()), t.tracking() ? t.phase_sigma_deg() : 0.0, id(virtual_ct).nis_avg(),
+                       t.frequency_hz(), f.n, f.frequency_hz, f.gain, f.rms_rel);
+            }
+            return;
+          }
           harvi::Packet decoded;
           if (!harvi::decode_payload(x, decoded)) return;
           ++id(valid_harvi_count);

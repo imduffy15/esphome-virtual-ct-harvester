@@ -52,7 +52,8 @@ then press Apply Input Settings and Restart.
 
 Wi-Fi recovery: hold BOOT for 10 seconds after normal startup to reset saved
 settings and return to setup. Do not hold BOOT while powering on.
-Keep this card private. CT measurements are not enabled in this build.
+Keep this card private. Pair with the Zappi and set its CT types before turning
+on Virtual CT Output; see the README.
 '''
     os.umask(0o077)
     for path, value in ((config, yaml), (card, instructions)):
