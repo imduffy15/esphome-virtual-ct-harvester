@@ -15,30 +15,30 @@ template<typename... Ts> class SendPacketAction final : public Action<Ts...>, pu
  public:
   void set_data_template(std::vector<uint8_t> (*func)(Ts...)) {
     this->data_.func = func;
-    this->len_ = -1;  // Sentinel value indicates template mode
+    this->len_ = -1;  // A sentinel value marks template mode.
   }
 
   void set_data_static(const uint8_t *data, size_t len) {
     this->data_.data = data;
-    this->len_ = len;  // Length >= 0 indicates static mode
+    this->len_ = len;  // A length of 0 or more marks static mode.
   }
 
   void play(const Ts &...x) override {
     std::vector<uint8_t> data;
     if (this->len_ >= 0) {
-      // Static mode: copy from flash to vector
+      // Static mode: copy the data from flash to a vector.
       data.assign(this->data_.data, this->data_.data + this->len_);
     } else {
-      // Template mode: call function
+      // Template mode: call the function.
       data = this->data_.func(x...);
     }
     this->parent_->transmit_packet(data);
   }
 
  protected:
-  ssize_t len_{-1};  // -1 = template mode, >=0 = static mode with length
+  ssize_t len_{-1};  // -1 for template mode, or the data length (0 or more) for static mode
   union Data {
-    std::vector<uint8_t> (*func)(Ts...);  // Function pointer (stateless lambdas)
+    std::vector<uint8_t> (*func)(Ts...);  // Function pointer for stateless lambdas
     const uint8_t *data;                  // Pointer to static data in flash
   } data_;
 };

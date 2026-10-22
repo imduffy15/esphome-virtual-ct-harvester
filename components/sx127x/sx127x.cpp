@@ -58,54 +58,54 @@ void IRAM_ATTR SX127x::gpio_intr(SX127x *arg) {
 }
 
 void SX127x::setup() {
-  // setup reset
+  // Set up the reset pin.
   this->rst_pin_->setup();
 
-  // setup dio0
+  // Set up the DIO0 interrupt pin.
   if (this->dio0_pin_) {
     this->dio0_pin_->setup();
     this->dio0_pin_->attach_interrupt(&SX127x::gpio_intr, this, gpio::INTERRUPT_RISING_EDGE);
   }
 
-  // start spi
+  // Start the SPI bus.
   this->spi_setup();
 
-  // configure rf
+  // Configure the radio.
   this->configure();
 }
 
 void SX127x::configure() {
-  // toggle chip reset
+  // Toggle the chip reset.
   this->rst_pin_->digital_write(false);
   delayMicroseconds(1000);
   this->rst_pin_->digital_write(true);
   delayMicroseconds(10000);
 
-  // check silicon version to make sure hw is ok
+  // Check the silicon version to confirm that the hardware responds.
   if (this->read_register_(REG_VERSION) != 0x12) {
     this->mark_failed();
     return;
   }
 
-  // enter sleep mode
+  // Enter sleep mode.
   this->set_mode_(MOD_FSK, MODE_SLEEP);
 
-  // set freq
+  // Set the frequency.
   uint64_t frf = ((uint64_t) this->frequency_ << 19) / FXOSC;
   this->write_register_(REG_FRF_MSB, (uint8_t) ((frf >> 16) & 0xFF));
   this->write_register_(REG_FRF_MID, (uint8_t) ((frf >> 8) & 0xFF));
   this->write_register_(REG_FRF_LSB, (uint8_t) ((frf >> 0) & 0xFF));
 
-  // enter standby mode
+  // Enter standby mode.
   this->set_mode_(MOD_FSK, MODE_STDBY);
 
-  // run image cal
+  // Run image calibration.
   this->run_image_cal();
 
-  // go back to sleep
+  // Return to sleep mode.
   this->set_mode_sleep();
 
-  // config pa
+  // Configure the power amplifier.
   if (this->pa_pin_ == PA_PIN_BOOST) {
     this->pa_power_ = std::max(this->pa_power_, (uint8_t) 2);
     this->pa_power_ = std::min(this->pa_power_, (uint8_t) 17);
@@ -120,14 +120,14 @@ void SX127x::configure() {
     this->write_register_(REG_PA_RAMP, this->pa_ramp_);
   }
 
-  // configure modem
+  // Configure the modem.
   if (this->modulation_ != MOD_LORA) {
     this->configure_fsk_ook_();
   } else {
     this->configure_lora_();
   }
 
-  // switch to rx or sleep
+  // Switch to receive or sleep mode.
   if (this->rx_start_) {
     this->set_mode_rx();
   } else {
@@ -136,20 +136,20 @@ void SX127x::configure() {
 }
 
 void SX127x::configure_fsk_ook_() {
-  // set the channel bw
+  // Set the channel bandwidth.
   this->write_register_(REG_RX_BW, BW_FSK_OOK[this->bandwidth_]);
 
-  // set fdev
+  // Set the frequency deviation.
   uint32_t fdev = std::min((this->deviation_ * 4096) / 250000, (uint32_t) 0x3FFF);
   this->write_register_(REG_FDEV_MSB, (uint8_t) ((fdev >> 8) & 0xFF));
   this->write_register_(REG_FDEV_LSB, (uint8_t) ((fdev >> 0) & 0xFF));
 
-  // set bitrate
-  uint64_t bitrate = (FXOSC + this->bitrate_ / 2) / this->bitrate_;  // round up
+  // Set the bitrate.
+  uint64_t bitrate = (FXOSC + this->bitrate_ / 2) / this->bitrate_;  // Round to nearest.
   this->write_register_(REG_BITRATE_MSB, (uint8_t) ((bitrate >> 8) & 0xFF));
   this->write_register_(REG_BITRATE_LSB, (uint8_t) ((bitrate >> 0) & 0xFF));
 
-  // configure rx and afc
+  // Configure receive and automatic frequency correction (AFC).
   uint8_t trigger = (this->preamble_detect_ > 0) ? TRIGGER_PREAMBLE : TRIGGER_RSSI;
   this->write_register_(REG_AFC_FEI, AFC_AUTO_CLEAR_ON);
   if (this->modulation_ == MOD_FSK) {
@@ -158,7 +158,7 @@ void SX127x::configure_fsk_ook_() {
     this->write_register_(REG_RX_CONFIG, AGC_AUTO_ON | trigger);
   }
 
-  // configure packet mode
+  // Configure packet mode.
   if (this->packet_mode_) {
     uint8_t crc_mode = (this->crc_enable_) ? CRC_ON : CRC_OFF;
     this->write_register_(REG_FIFO_THRESH, TX_START_FIFO_EMPTY);
@@ -175,7 +175,7 @@ void SX127x::configure_fsk_ook_() {
   }
   this->write_register_(REG_DIO_MAPPING1, DIO0_MAPPING_00);
 
-  // config bit synchronizer
+  // Configure the bit synchronizer.
   uint8_t polarity = (this->preamble_polarity_ == 0xAA) ? PREAMBLE_AA : PREAMBLE_55;
   if (!this->sync_value_.empty()) {
     uint8_t size = this->sync_value_.size() - 1;
@@ -187,7 +187,7 @@ void SX127x::configure_fsk_ook_() {
     this->write_register_(REG_SYNC_CONFIG, AUTO_RESTART_PLL_LOCK | polarity);
   }
 
-  // config preamble detector
+  // Configure the preamble detector.
   if (this->preamble_detect_ > 0) {
     uint8_t size = (this->preamble_detect_ - 1) << PREAMBLE_DETECTOR_SIZE_SHIFT;
     uint8_t tol = this->preamble_errors_ << PREAMBLE_DETECTOR_TOL_SHIFT;
@@ -198,41 +198,41 @@ void SX127x::configure_fsk_ook_() {
   this->write_register_(REG_PREAMBLE_SIZE_MSB, this->preamble_size_ >> 8);
   this->write_register_(REG_PREAMBLE_SIZE_LSB, this->preamble_size_ & 0xFF);
 
-  // config sync generation and setup ook threshold
+  // Configure sync generation and the OOK threshold.
   uint8_t bitsync = this->bitsync_ ? BIT_SYNC_ON : BIT_SYNC_OFF;
   this->write_register_(REG_OOK_PEAK, bitsync | OOK_THRESH_STEP_0_5 | OOK_THRESH_PEAK);
   this->write_register_(REG_OOK_AVG, OOK_AVG_RESERVED | OOK_THRESH_DEC_1_8);
 
-  // Harvi profile: LNA max gain with HF boost (RegLna), and the AFC filter as
-  // wide as the channel filter (RegAfcBw) so the short preamble is not cut.
+  // Harvi profile: maximum LNA gain with HF boost (RegLna), and an AFC filter as
+  // wide as the channel filter (RegAfcBw) so the short preamble isn't cut off.
   this->write_register_(0x0C, 0x23);
   this->write_register_(0x13, BW_FSK_OOK[this->bandwidth_]);
 
-  // set rx floor
+  // Set the receive floor.
   this->write_register_(REG_OOK_FIX, 256 + int(this->rx_floor_ * 2.0f));
   this->write_register_(REG_RSSI_THRESH, std::abs(int(this->rx_floor_ * 2.0f)));
 }
 
 void SX127x::configure_lora_() {
-  // config modem
+  // Configure the modem.
   uint8_t header_mode = this->payload_length_ > 0 ? IMPLICIT_HEADER : EXPLICIT_HEADER;
   uint8_t crc_mode = (this->crc_enable_) ? RX_PAYLOAD_CRC_ON : RX_PAYLOAD_CRC_OFF;
   uint8_t spreading_factor = this->spreading_factor_ << SPREADING_FACTOR_SHIFT;
   this->write_register_(REG_MODEM_CONFIG1, BW_LORA[this->bandwidth_] | this->coding_rate_ | header_mode);
   this->write_register_(REG_MODEM_CONFIG2, spreading_factor | crc_mode);
 
-  // config fifo and payload length
+  // Configure the FIFO and payload length.
   this->write_register_(REG_FIFO_TX_BASE_ADDR, 0x00);
   this->write_register_(REG_FIFO_RX_BASE_ADDR, 0x00);
   this->write_register_(REG_PAYLOAD_LENGTH, std::max(this->payload_length_, (uint32_t) 1));
 
-  // config preamble
+  // Configure the preamble.
   if (this->preamble_size_ >= 6) {
     this->write_register_(REG_PREAMBLE_LEN_MSB, this->preamble_size_ >> 8);
     this->write_register_(REG_PREAMBLE_LEN_LSB, this->preamble_size_ & 0xFF);
   }
 
-  // optimize detection
+  // Optimize detection.
   float duration = 1000.0f * (1UL << this->spreading_factor_) / BW_HZ[this->bandwidth_];
   if (duration > 16) {
     this->write_register_(REG_MODEM_CONFIG3, MODEM_AGC_AUTO_ON | LOW_DATA_RATE_OPTIMIZE_ON);
@@ -247,7 +247,7 @@ void SX127x::configure_lora_() {
     this->write_register_(REG_DETECT_THRESHOLD, 0x0A);
   }
 
-  // config sync word
+  // Configure the sync word.
   if (!this->sync_value_.empty()) {
     this->write_register_(REG_SYNC_WORD, this->sync_value_[0]);
   }
@@ -276,16 +276,16 @@ SX127xError SX127x::transmit_packet_at(const std::vector<uint8_t> &packet, uint3
 SX127xError SX127x::transmit_(const std::vector<uint8_t> &packet, bool scheduled, uint32_t at_us) {
   if (this->is_failed()) return SX127xError::INVALID_PARAMS;
   if (this->payload_length_ > 0 && this->payload_length_ != packet.size()) {
-    ESP_LOGE(TAG, "Packet size does not match config");
+    ESP_LOGE(TAG, "Packet size doesn't match the configured payload length");
     return SX127xError::INVALID_PARAMS;
   }
   if (packet.empty() || packet.size() > this->get_max_packet_size()) {
-    ESP_LOGE(TAG, "Packet size out of range");
+    ESP_LOGE(TAG, "Packet size is out of range");
     return SX127xError::INVALID_PARAMS;
   }
 
   if (this->dio0_pin_ == nullptr) {
-    ESP_LOGE(TAG, "DIO0 pin not configured, cannot wait for transmit completion");
+    ESP_LOGE(TAG, "DIO0 pin isn't configured, so transmit completion can't be detected");
     return SX127xError::INVALID_PARAMS;
   }
 
@@ -301,7 +301,7 @@ SX127xError SX127x::transmit_(const std::vector<uint8_t> &packet, bool scheduled
     this->set_mode_tx();
   } else {
     this->set_mode_standby();
-    // Clear an unread RX packet before loading TX (SX1276 RegIrqFlags2).
+    // Clear an unread receive packet before loading the transmit FIFO (SX1276 RegIrqFlags2).
     this->write_register_(0x3F, 0x10);
     if (this->payload_length_ == 0) {
       this->write_register_(REG_FIFO, packet.size());
@@ -311,7 +311,7 @@ SX127xError SX127x::transmit_(const std::vector<uint8_t> &packet, bool scheduled
       while (int32_t(micros() - at_us) < 0) {
       }
       if (int32_t(micros() - at_us) > 100) {
-        // Never send a phase-stamped payload late: flush FIFO and resume RX.
+        // Never send a phase-stamped payload late. Flush the FIFO and resume receiving.
         this->write_register_(0x3F, 0x10);
         if (this->rx_start_) this->set_mode_rx();
         return SX127xError::LATE;
@@ -324,15 +324,15 @@ SX127xError SX127x::transmit_(const std::vector<uint8_t> &packet, bool scheduled
     this->set_mode_tx();
   }
 
-  // wait until transmit completes, typically the delay will be less than 100 ms
+  // Wait until the transmission completes. This usually takes less than 100 ms.
   uint32_t start = millis();
   const uint32_t timeout_ms = this->modulation_ == MOD_LORA ? 4000 :
       20 + ((packet.size() + this->preamble_size_ + this->sync_value_.size() + 3) * 8000 / this->bitrate_);
-  // PacketSent is authoritative for FSK; a stale RX DIO level is not success.
+  // PacketSent is authoritative for FSK. A stale receive DIO level doesn't mean success.
   while (this->modulation_ == MOD_LORA ? !this->dio0_pin_->digital_read() :
          !(this->read_register_(0x3F) & 0x08)) {
     if (millis() - start > timeout_ms) {
-      ESP_LOGE(TAG, "Transmit packet failure");
+      ESP_LOGE(TAG, "Packet transmission failed");
       ret = SX127xError::TIMEOUT;
       break;
     }
@@ -410,7 +410,7 @@ void SX127x::run_image_cal() {
   uint32_t start = millis();
   while (this->read_register_(REG_IMAGE_CAL) & IMAGE_CAL_RUNNING) {
     if (millis() - start > 20) {
-      ESP_LOGE(TAG, "Image cal failure");
+      ESP_LOGE(TAG, "Image calibration failed");
       this->mark_failed();
       break;
     }
@@ -433,7 +433,7 @@ void SX127x::set_mode_(uint8_t modulation, uint8_t mode) {
       break;
     }
     if (millis() - start > 20) {
-      ESP_LOGE(TAG, "Set mode failure");
+      ESP_LOGE(TAG, "Setting the radio mode failed");
       this->mark_failed();
       return;
     }
@@ -462,20 +462,20 @@ void SX127x::set_mode_sleep() { this->set_mode_(this->modulation_, MODE_SLEEP); 
 
 void SX127x::dump_config() {
   ESP_LOGCONFIG(TAG, "SX127x:");
-  LOG_PIN("  CS Pin: ", this->cs_);
-  LOG_PIN("  RST Pin: ", this->rst_pin_);
-  LOG_PIN("  DIO0 Pin: ", this->dio0_pin_);
+  LOG_PIN("  CS pin: ", this->cs_);
+  LOG_PIN("  RST pin: ", this->rst_pin_);
+  LOG_PIN("  DIO0 pin: ", this->dio0_pin_);
   const char *pa_pin = "RFO";
   if (this->pa_pin_ == PA_PIN_BOOST) {
     pa_pin = "BOOST";
   }
   ESP_LOGCONFIG(TAG,
-                "  Auto Cal: %s\n"
+                "  Auto calibration: %s\n"
                 "  Frequency: %" PRIu32 " Hz\n"
                 "  Bandwidth: %" PRIu32 " Hz\n"
-                "  PA Pin: %s\n"
-                "  PA Power: %" PRIu8 " dBm\n"
-                "  PA Ramp: %" PRIu16 " us",
+                "  PA pin: %s\n"
+                "  PA power: %" PRIu8 " dBm\n"
+                "  PA ramp: %" PRIu16 " us",
                 TRUEFALSE(this->auto_cal_), this->frequency_, BW_HZ[this->bandwidth_], pa_pin, this->pa_power_,
                 RAMP[this->pa_ramp_]);
   if (this->modulation_ == MOD_FSK) {
@@ -492,16 +492,16 @@ void SX127x::dump_config() {
     }
     ESP_LOGCONFIG(TAG,
                   "  Modulation: LORA\n"
-                  "  Preamble Size: %" PRIu16 "\n"
-                  "  Spreading Factor: %" PRIu8 "\n"
-                  "  Coding Rate: %s\n"
-                  "  CRC Enable: %s",
+                  "  Preamble size: %" PRIu16 "\n"
+                  "  Spreading factor: %" PRIu8 "\n"
+                  "  Coding rate: %s\n"
+                  "  CRC enable: %s",
                   this->preamble_size_, this->spreading_factor_, cr, TRUEFALSE(this->crc_enable_));
     if (this->payload_length_ > 0) {
-      ESP_LOGCONFIG(TAG, "  Payload Length: %" PRIu32, this->payload_length_);
+      ESP_LOGCONFIG(TAG, "  Payload length: %" PRIu32, this->payload_length_);
     }
     if (!this->sync_value_.empty()) {
-      ESP_LOGCONFIG(TAG, "  Sync Value: 0x%02x", this->sync_value_[0]);
+      ESP_LOGCONFIG(TAG, "  Sync value: 0x%02x", this->sync_value_[0]);
     }
   } else {
     const char *shaping = "NONE";
@@ -525,29 +525,29 @@ void SX127x::dump_config() {
                   "  Modulation: %s\n"
                   "  Bitrate: %" PRIu32 "b/s\n"
                   "  Bitsync: %s\n"
-                  "  Rx Start: %s\n"
-                  "  Rx Floor: %.1f dBm\n"
-                  "  Packet Mode: %s",
+                  "  RX start: %s\n"
+                  "  RX floor: %.1f dBm\n"
+                  "  Packet mode: %s",
                   shaping, this->modulation_ == MOD_FSK ? LOG_STR_LITERAL("FSK") : LOG_STR_LITERAL("OOK"),
                   this->bitrate_, TRUEFALSE(this->bitsync_), TRUEFALSE(this->rx_start_), this->rx_floor_,
                   TRUEFALSE(this->packet_mode_));
     if (this->packet_mode_) {
-      ESP_LOGCONFIG(TAG, "  CRC Enable: %s", TRUEFALSE(this->crc_enable_));
+      ESP_LOGCONFIG(TAG, "  CRC enable: %s", TRUEFALSE(this->crc_enable_));
     }
     if (this->payload_length_ > 0) {
-      ESP_LOGCONFIG(TAG, "  Payload Length: %" PRIu32, this->payload_length_);
+      ESP_LOGCONFIG(TAG, "  Payload length: %" PRIu32, this->payload_length_);
     }
     if (!this->sync_value_.empty()) {
-      char hex_buf[17];  // 8 bytes max = 16 hex chars + null
-      ESP_LOGCONFIG(TAG, "  Sync Value: 0x%s",
+      char hex_buf[17];  // Up to 8 bytes: 16 hex characters plus a null terminator.
+      ESP_LOGCONFIG(TAG, "  Sync value: 0x%s",
                     format_hex_to(hex_buf, this->sync_value_.data(), this->sync_value_.size()));
     }
     if (this->preamble_size_ > 0 || this->preamble_detect_ > 0) {
       ESP_LOGCONFIG(TAG,
-                    "  Preamble Polarity: 0x%X\n"
-                    "  Preamble Size: %" PRIu16 "\n"
-                    "  Preamble Detect: %" PRIu8 "\n"
-                    "  Preamble Errors: %" PRIu8,
+                    "  Preamble polarity: 0x%X\n"
+                    "  Preamble size: %" PRIu16 "\n"
+                    "  Preamble detect: %" PRIu8 "\n"
+                    "  Preamble errors: %" PRIu8,
                     this->preamble_polarity_, this->preamble_size_, this->preamble_detect_, this->preamble_errors_);
     }
   }

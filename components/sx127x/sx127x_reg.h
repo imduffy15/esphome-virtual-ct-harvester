@@ -5,7 +5,7 @@
 namespace esphome::sx127x {
 
 enum SX127xReg : uint8_t {
-  // Common registers
+  // Registers shared by all modes
   REG_FIFO = 0x00,
   REG_OP_MODE = 0x01,
   REG_BITRATE_MSB = 0x02,
@@ -20,7 +20,7 @@ enum SX127xReg : uint8_t {
   REG_DIO_MAPPING1 = 0x40,
   REG_DIO_MAPPING2 = 0x41,
   REG_VERSION = 0x42,
-  // FSK/OOK registers
+  // FSK and OOK registers
   REG_RX_CONFIG = 0x0D,
   REG_RSSI_THRESH = 0x10,
   REG_RX_BW = 0x12,

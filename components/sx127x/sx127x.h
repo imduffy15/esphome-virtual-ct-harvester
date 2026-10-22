@@ -81,14 +81,15 @@ class SX127x final : public Component,
   void set_sync_value(const std::vector<uint8_t> &sync_value) { this->sync_value_ = sync_value; }
   void run_image_cal();
   void configure();
-  // Local Harvi diagnostics: edge time, not a mains phase reference.
+  // Harvi diagnostics: the interrupt edge time. It isn't a mains phase reference.
   uint32_t get_last_irq_us() const { return this->last_irq_us_; }
   uint8_t diagnostic_register(uint8_t reg) { return this->read_register_(reg); }
   SX127xError transmit_packet(const std::vector<uint8_t> &packet);
-  // FSK only: load the FIFO, then start TX at micros() == at_us. Returns LATE
-  // without transmitting if the deadline was missed by more than 100 us.
+  // FSK only: loads the FIFO, then starts transmitting at micros() == at_us.
+  // Returns LATE without transmitting if the deadline was missed by more than
+  // 100 us.
   SX127xError transmit_packet_at(const std::vector<uint8_t> &packet, uint32_t at_us);
-  // micros() immediately before the OpMode=TX write, and that write's duration.
+  // micros() immediately before the OpMode=TX write, and the write's duration.
   uint32_t get_last_tx_us() const { return this->last_tx_us_; }
   uint32_t get_last_tx_write_us() const { return this->last_tx_write_us_; }
   void register_listener(SX127xListener *listener) { this->listeners_.push_back(listener); }

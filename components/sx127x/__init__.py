@@ -167,26 +167,26 @@ def validate_config(config: ConfigType) -> ConfigType:
         if config[CONF_BANDWIDTH] not in bws:
             raise cv.Invalid(f"{config[CONF_BANDWIDTH]} is not available with LORA")
         if CONF_DIO0_PIN not in config:
-            raise cv.Invalid("Cannot use LoRa without dio0_pin")
+            raise cv.Invalid("LoRa modulation requires 'dio0_pin'")
         if config[CONF_PREAMBLE_SIZE] < 6:
-            raise cv.Invalid("Minimum 'preamble_size' is 6 with LORA")
+            raise cv.Invalid("'preamble_size' must be at least 6 with LoRa modulation")
         if config[CONF_SPREADING_FACTOR] == 6 and config[CONF_PAYLOAD_LENGTH] == 0:
-            raise cv.Invalid("Payload length must be set when spreading factor is 6")
+            raise cv.Invalid("Set 'payload_length' when the spreading factor is 6")
     else:
         if config[CONF_BANDWIDTH] == "500_0kHz":
             raise cv.Invalid(f"{config[CONF_BANDWIDTH]} is only available with LORA")
         if CONF_BITSYNC not in config:
-            raise cv.Invalid("Config 'bitsync' required with FSK/OOK")
+            raise cv.Invalid("FSK and OOK modulation require 'bitsync'")
         if CONF_PACKET_MODE not in config:
-            raise cv.Invalid("Config 'packet_mode' required with FSK/OOK")
+            raise cv.Invalid("FSK and OOK modulation require 'packet_mode'")
         if config[CONF_PACKET_MODE] and CONF_DIO0_PIN not in config:
-            raise cv.Invalid("Config 'dio0_pin' required in packet mode")
+            raise cv.Invalid("Packet mode requires 'dio0_pin'")
         if config[CONF_PAYLOAD_LENGTH] > 64:
-            raise cv.Invalid("Payload length must be <= 64 with FSK/OOK")
+            raise cv.Invalid("'payload_length' must be 64 or less with FSK or OOK modulation")
     if config[CONF_PA_PIN] == "RFO" and config[CONF_PA_POWER] > 15:
-        raise cv.Invalid("PA power must be <= 15 dbm when using the RFO pin")
+        raise cv.Invalid("'pa_power' must be 15 dBm or less with the RFO pin")
     if config[CONF_PA_PIN] == "BOOST" and config[CONF_PA_POWER] < 2:
-        raise cv.Invalid("PA power must be >= 2 dbm when using the BOOST pin")
+        raise cv.Invalid("'pa_power' must be at least 2 dBm with the BOOST pin")
     return config
 
 
@@ -357,7 +357,7 @@ async def send_packet_action_to_code(
         templ = await cg.templatable(data, args, cg.std_vector.template(cg.uint8))
         cg.add(var.set_data_template(templ))
     else:
-        # Generate static array in flash to avoid RAM copy
+        # Generate a static array in flash to avoid copying it to RAM.
         arr_id = ID(f"{action_id}_data", is_declaration=True, type=cg.uint8)
         arr = cg.static_const_array(arr_id, cg.ArrayInitializer(*data))
         cg.add(var.set_data_static(arr, len(data)))

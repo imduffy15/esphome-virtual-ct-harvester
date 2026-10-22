@@ -95,11 +95,11 @@ class Pairing {
   uint8_t sequence_{0};
 };
 
-// Zappi status broadcasts heard over RF (same records as its LAN multicast).
-// Offsets were validated on 2026-10-21 against captures. Byte 1 is a
-// per-installation device byte: neighbouring myenergi systems share the
-// channel, so only frames carrying our Zappi's byte may be used. It is learned
-// from a 0x3730 record that lists this virtual Harvi's serial.
+// Zappi status broadcasts heard over RF (the same records as its LAN
+// multicast). Offsets were validated against captures on 2026-10-21. Byte 1 is
+// a per-installation device byte. Neighboring myenergi systems share the
+// channel, so use only frames that carry this installation's Zappi byte. The
+// byte is learned from a 0x3730 record that lists this virtual Harvi's serial.
 struct ZappiStatus {
   uint8_t device{0};
   uint16_t type{0};
@@ -167,11 +167,12 @@ inline CT rotated_ct(int32_t magnitude, double angle_deg) {
           int16_t(std::lround(magnitude * std::sin(a)))};
 }
 
-// Model: the Zappi reports r = M cos(a - phi(t)), where a is the phasor angle we
-// sent, M the magnitude it computes, and phi(t) = phi0 + 360 * F * (t - t_ref)
-// is its mains phase in this MCU's microsecond clock (constant radio latency
-// and the Zappi's fixed correction are absorbed into phi0). Fitted by a grid
-// search over F with linear least squares for phi0 at each candidate.
+// Model: the Zappi reports r = M cos(a - phi(t)), where a is the sent phasor
+// angle, M is the magnitude the Zappi computes, and
+// phi(t) = phi0 + 360 * F * (t - t_ref) is its mains phase in this MCU's
+// microsecond clock. phi0 absorbs the constant radio latency and the Zappi's
+// fixed correction. The fit is a grid search over F, with linear least squares
+// for phi0 at each candidate.
 class PhaseTracker {
  public:
   struct Obs { uint32_t t_us; float angle_deg, magnitude_w, reported_w; };
@@ -193,7 +194,7 @@ class PhaseTracker {
     }
     obs_[count_++] = o;
   }
-  // nominal_hz: Zappi-reported frequency, used to centre the search.
+  // nominal_hz: the Zappi-reported frequency, used to center the search.
   const Fit &solve(double nominal_hz) {
     fit_ = Fit{};
     // Drop observations older than the window.
@@ -316,7 +317,7 @@ class PhaseTracker {
     p_[0][0] = 100.0; p_[0][1] = p_[1][0] = 0.0; p_[1][1] = 1e-4;
   }
   void stop_tracking() { tracking_ = false; }
-  // Returns the normalised innovation squared, or a negative value if gated out.
+  // Returns the normalized innovation squared, or a negative value if gated out.
   double track(const Obs &o) {
     if (!tracking_ || !(o.magnitude_w >= MIN_MAGNITUDE_W)) return -1;
     const double dt = double(int32_t(o.t_us - t_ekf_)) * 1e-6;
@@ -361,32 +362,33 @@ class PhaseTracker {
 };
 
 // Virtual Harvi measurement transmitter with closed-loop phase tracking.
-// Measured on air (2026-10-21): a 0x3601 total reflects the latest of our
-// packets received >= ~200 ms before it; when the Zappi has not taken up a
-// newer packet the total repeats exactly, so exact repeats are discarded.
-// Packets are sent shortly after each status, ~750 ms before the next one. Until the phase fit is good, the phasor is
-// sent unrotated (the mains phase then sweeps past it, which is what the fit
-// needs, helped by golden-angle steps); once locked it is rotated by the
-// predicted Zappi phase.
+// Measured on air (2026-10-21): a 0x3601 total reflects the latest packet from
+// this device that arrived at least ~200 ms before it. When the Zappi hasn't
+// taken up a newer packet, the total repeats exactly, so exact repeats are
+// discarded. Packets are sent shortly after each status, ~550 ms before the
+// next one. Until the phase fit is good, the phasor is sent unrotated: the
+// mains phase then sweeps past it, which the fit needs, and golden-angle steps
+// help. After lock, the phasor is rotated by the predicted Zappi phase.
 class VirtualCT {
  public:
-  // The Zappi's totals go out on a 1 s tick. Measured airtime around it:
-  // its own records at +0/+50/+125/+200 ms and the genuine Harvi mostly at
-  // +225..350 and +750..850 ms. One packet is sent in the quiet slot 450 ms
-  // after each heard total, ~550 ms before the next tick (take-up >= 200 ms). With one packet per heard total, attribution is unambiguous:
-  // if the Zappi missed our packet, the next total repeats the one that
-  // triggered it and is dropped as stale. The tick-aligned keep-alive only
-  // covers long gaps (the Zappi holds a value for >= 34 s).
+  // The Zappi's totals go out on a 1 s tick. Measured airtime around it: the
+  // Zappi's own records at +0/+50/+125/+200 ms, and the genuine Harvi mostly
+  // at +225..350 and +750..850 ms. One packet is sent in the quiet slot 450 ms
+  // after each heard total, ~550 ms before the next tick (take-up >= 200 ms).
+  // With one packet per heard total, attribution is unambiguous: if the Zappi
+  // missed this device's packet, the next total repeats the one that triggered
+  // it and is dropped as stale. The tick-aligned keep-alive covers only long
+  // gaps (the Zappi holds a value for >= 34 s).
   static constexpr uint32_t REPORT_DELAY_US = 450000, FALLBACK_US = 7995000;
   static constexpr uint32_t LEAD_US = 4000, MIN_REPORT_AGE_US = 250000;
   // Quadrature pilot on the feedback CT: keeps the loop observable at night
   // and gives first-order error sensitivity. Alternating +/-3 deg about 90 deg
   // makes consecutive fresh totals differ (+/-16 W), so exact repeats remain
-  // a reliable stale-report test despite the Zappi's 1-degree quantisation.
+  // a reliable stale-report test despite the Zappi's 1-degree quantization.
   static constexpr double LOCK_SIGMA_DEG = 12.0, RESET_SIGMA_DEG = 60.0;
-  // Ride-through: after losing lock, keep sending grid/battery rotated by a
+  // Ride-through: after losing lock, keep sending grid and battery rotated by a
   // snapshot of the last healthy lock for up to RIDE_US, while the snapshot's
-  // propagated uncertainty stays under RIDE_SIGMA_DEG; then withhold them.
+  // propagated uncertainty stays under RIDE_SIGMA_DEG. Then withhold them.
   static constexpr uint32_t RIDE_US = 15000000;
   static constexpr double RIDE_SIGMA_DEG = 25.0;
   static constexpr float PILOT_W = 300.0f, PILOT_SKEW_DEG = HARVI_PILOT_SKEW;
@@ -406,8 +408,8 @@ class VirtualCT {
   // total includes devices other than this virtual Harvi.
   int8_t generation_ct{1}, grid_ct{-1};
   // Local mains voltage estimate (dV), used until the Zappi's own 0x5a5a is
-  // heard. Waiting for it deadlocks: the Zappi can stay quiet on RF until it
-  // hears its Harvi.
+  // heard. Waiting for 0x5a5a would deadlock, because the Zappi can stay quiet
+  // on RF until it hears its Harvi.
   uint16_t fallback_voltage_dv{2300};
 
   void start(uint32_t now_ms) {
@@ -444,9 +446,10 @@ class VirtualCT {
     if (s.type != 0x3601) return false;
     bool added = false;
     // Candidate packets: unused and old enough to be reflected in this total.
-    // Normally exactly one. If a report was missed and the Zappi also missed
-    // our newer packet, the total may reflect an older candidate: then choose
-    // the one the current phase estimate explains clearly better, or skip.
+    // Normally there's exactly one. If a report was missed and the Zappi also
+    // missed this device's newer packet, the total might reflect an older
+    // candidate. Then choose the one the current phase estimate explains
+    // clearly better, or skip.
     Sent *packet = nullptr;
     size_t candidates = 0;
     for (auto &p : history_) {
@@ -513,9 +516,9 @@ class VirtualCT {
 
   // Called frequently. When a packet is due, returns its payload and sets
   // at_us: the caller must transmit with transmit_packet_at(payload, at_us).
-  // inputs_ok=false (stale/unavailable source) keeps the pilot running so the
-  // phase stays locked, but omits every measurement: the Zappi then reads 0
-  // rather than a frozen value.
+  // inputs_ok=false (stale or unavailable source) keeps the pilot running so
+  // the phase stays locked, but omits every measurement. The Zappi then reads 0
+  // instead of a frozen value.
   std::vector<uint8_t> next(uint32_t now_ms, uint32_t now_us, float grid_w, float solar_w,
                             float battery_w, bool inputs_ok, uint32_t &at_us) {
     if (!seconds_left(now_ms)) { stop(); return {}; }
@@ -533,22 +536,23 @@ class VirtualCT {
     if (!after_report && !fallback) return {};
     at_us = now_us + LEAD_US;
     // Coasting without feedback: the propagated uncertainty decides. Output is
-    // withheld beyond LOCK_SIGMA_DEG; the filter keeps its state and
+    // withheld beyond LOCK_SIGMA_DEG. The filter keeps its state and
     // re-converges when feedback returns (the pilot's error signal is
-    // unambiguous within +/-90 deg). Only beyond RESET_SIGMA_DEG start over.
+    // unambiguous within +/-90 deg). Start over only beyond RESET_SIGMA_DEG.
     const double sigma = tracker_.phase_sigma_at(at_us);
     if (tracker_.tracking() && sigma > RESET_SIGMA_DEG) { tracker_.stop_tracking(); tracker_.reset(); }
     const bool output = locked_ && tracker_.tracking() && sigma < LOCK_SIGMA_DEG;
     const bool rotate = tracking_enabled && tracker_.tracking();
-    // Acquisition: golden-angle steps guarantee phase diversity even when our
-    // send times are commensurate with the mains cycle (they follow the
-    // Zappi's 1 s status ticks, and 50 Hz has an integer number of cycles).
+    // Acquisition: golden-angle steps guarantee phase diversity even when send
+    // times are commensurate with the mains cycle. Send times follow the
+    // Zappi's 1 s status ticks, and 50 Hz has an integer number of cycles per
+    // second.
     const double base = rotate ? tracker_.predict(at_us) : std::fmod(sequence_ * 137.50776, 360.0);
     if (output && nis_avg_ < 2.0) { hold_ = tracker_; hold_us_ = at_us; have_hold_ = true; }
     // Ride only through quiet gaps (tracker still consistent). After the
-    // feedback has shown a phase jump the held phase is wrong: in an overnight
-    // soak, holding then flipped the battery sign in 58 of 195 records,
-    // against 1 of 93 when the tracker was still consistent.
+    // feedback has shown a phase jump, the held phase is wrong. In an overnight
+    // soak test, holding then flipped the battery sign in 58 of 195 records,
+    // compared with 1 of 93 when the tracker was still consistent.
     const bool ride = !output && have_hold_ && tracker_.tracking() && nis_avg_ < 4.0 &&
                       int32_t(at_us - hold_us_) < int32_t(RIDE_US) &&
                       hold_.phase_sigma_at(at_us) < RIDE_SIGMA_DEG;
@@ -610,7 +614,7 @@ class VirtualCT {
   }
 
  private:
-  // Acquire with the batch fit; then track with the EKF. Output is "locked"
+  // Acquire with the batch fit, then track with the EKF. Output is "locked"
   // only while the EKF is confident and its innovations are consistent.
   void update_lock_() {
     if (!tracker_.tracking()) {
@@ -654,14 +658,15 @@ class Scan {
   uint8_t index{0};
   void start(uint32_t now) { active=true; found=false; index=0; entered_=now; matches_=0; }
   void stop() { active=false; }
-  // Return true when a retune is due. One finite 8 x 12-second sweep.
+  // Returns true when a retune is due. Runs one 8 x 12-second sweep, then stops.
   bool advance(uint32_t now) {
     if (!active || uint32_t(now-entered_) < 12000) return false;
     if (index==7) { active=false; return false; }
     ++index; entered_=now; matches_=0; return true;
   }
-  // Without a reference Harvi (none, or retired and its serial reused by this
-  // device), the channel is found from any Zappi's status broadcasts.
+  // Without a reference Harvi (none installed, or one retired and its serial
+  // reused by this device), the channel is found from any Zappi's status
+  // broadcasts.
   bool observe_zappi(const ZappiStatus &status) {
     if (!active || reference_serial != 0 || !status.type) return false;
     if (++matches_ >= 2) { found=true; active=false; return true; }
@@ -669,7 +674,7 @@ class Scan {
   }
   bool observe(const Packet &packet) {
     if (!active || reference_serial == 0 || packet.serial != reference_serial) return false;
-    // Distinct sequence values: repeated cached/duplicate packets cannot lock it.
+    // Require distinct sequence values, so cached or duplicate packets can't lock the scan.
     if (matches_ && packet.sequence == sequence_) return false;
     sequence_=packet.sequence;
     if (++matches_ >= 2) { found=true; active=false; return true; }
@@ -690,7 +695,7 @@ inline bool valid_entity_id(const std::string &value) {
   return true;
 }
 
-// Receipt-age diagnostics only; not proof of source measurement freshness.
+// Receipt-age diagnostics only. They don't prove that the source measurement is fresh.
 class InputFreshness {
  public:
   void set_enabled(size_t channel, bool enabled) {
@@ -712,8 +717,9 @@ class InputFreshness {
     }
     return any;
   }
-  // Every configured input has a finite value received since the API
-  // (re)connected. Gates CT measurements; unconfigured inputs are ignored.
+  // True when every configured input has a finite value received since the
+  // API connection last started. Gates CT measurements. Unconfigured inputs
+  // are ignored.
   bool enabled(size_t channel) const { return channel < 3 && enabled_[channel]; }
   bool usable() const {
     for (size_t i=0; i<3; ++i) if (enabled_[i] && !valid_[i]) return false;

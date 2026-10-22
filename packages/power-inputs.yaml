@@ -1,4 +1,5 @@
-# Restore settings before native HA subscriptions are set up (priority 100).
+# Restore settings before native Home Assistant subscriptions are set up
+# (priority 100).
 esphome:
   on_boot:
     - priority: 550
@@ -45,7 +46,7 @@ sensor:
   - platform: homeassistant
     id: power_input_1
     entity_id: sensor.unconfigured_input_1
-    name: Power Input 1
+    name: Power input 1
     internal: false
     unit_of_measurement: W
     device_class: power
@@ -57,7 +58,7 @@ sensor:
   - platform: homeassistant
     id: power_input_2
     entity_id: sensor.unconfigured_input_2
-    name: Power Input 2
+    name: Power input 2
     internal: false
     unit_of_measurement: W
     device_class: power
@@ -69,7 +70,7 @@ sensor:
   - platform: homeassistant
     id: power_input_3
     entity_id: sensor.unconfigured_input_3
-    name: Power Input 3
+    name: Power input 3
     internal: false
     unit_of_measurement: W
     device_class: power

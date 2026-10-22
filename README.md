@@ -1,237 +1,490 @@
 # Virtual CT Harvester for ESPHome
 
-Independent community project; not affiliated with or endorsed by myenergi.
-The harvi and zappi names identify myenergi products and the protocol targeted
-by this experimental implementation. Virtual CT Harvester is this project’s own name.
+Virtual CT Harvester turns a LILYGO T3 LoRa32 board into a virtual myenergi
+Harvi. It reads up to three power sensors from Home Assistant and sends them to
+a myenergi Zappi electric vehicle (EV) charger over radio as current
+transformer (CT) readings.
 
-A configurable Home Assistant radio gateway for the **LILYGO T3 LoRa32 V1.6.1
-(classic ESP32, SX1276, 868 MHz, 0.96-inch OLED)**. Works with power sensors from
-any Home Assistant integration, with no vendor-specific dependencies.
+A Harvi is a myenergi wireless sensor that measures power with clamp-on CTs and
+reports it to a Zappi. With Virtual CT Harvester, you can use power sensors from
+any Home Assistant integration, such as a smart meter, solar inverter, or home
+battery, instead of installing CT clamps. The device has no vendor-specific
+dependencies and needs no extra hardware.
 
-**Experimental:** pairs with a Zappi as a Harvi and sends three Home Assistant
-power readings as its CT1–CT3, with no extra hardware. The board has no mains
-reference; it infers the Zappi's mains phase from the Zappi's own radio
-broadcasts (see [How it works](#how-it-works)). It has been validated on one
-installation (single phase, 230 V, 50 Hz), including an overnight soak from
-export through 9 kW import. Treat it as experimental until you have checked
-its readings against your own meter.
+> [!NOTE]
+> Virtual CT Harvester is an independent community project. It isn't affiliated
+> with or endorsed by myenergi. The Harvi and Zappi names identify the myenergi
+> products and the radio protocol that this project targets.
+
+> [!WARNING]
+> This project is experimental. Testing so far covers one installation (single
+> phase, 230 V, 50 Hz), including an overnight test that ran from export through
+> 9 kW import. Check the readings against your own meter before you rely on
+> them.
+
+## Supported hardware
+
+- **LILYGO T3 LoRa32 V1.6.1** with a classic ESP32, an SX1276 radio, the 868 MHz
+  band, and a 0.96-inch organic light-emitting diode (OLED) display.
+- The board's 868 MHz antenna.
+- A USB cable and power supply.
+
+Other variants, such as boards with an SX1262 radio, an ESP32-S3, or a 433 MHz
+radio, aren't supported. For pin assignments, see
+[Hardware reference](#hardware-reference).
+
+The board has no connection to mains power. It infers the Zappi's mains phase,
+which is the current position in the alternating current (AC) cycle of your
+electricity supply, from the Zappi's own radio broadcasts. For details, see
+[How it works](#how-it-works).
 
 ## Set up a preflashed device
 
-You need the device's private setup card, your 2.4 GHz Wi-Fi password and Home
-Assistant. Attach the 868 MHz antenna, then power the board with a USB cable.
+Follow these steps if you received a device that someone else built and
+flashed. To build your own, see
+[Build and flash your own device](#build-and-flash-your-own-device).
 
-1. On your phone, join **Virtual CT Harvester …** using the password on the setup card.
-   The setup network appears when the device has no working Wi-Fi connection.
-   If your phone says it has no internet, stay connected. Open **http://192.168.4.1**
-   if the Wi-Fi setup page does not open automatically. Select your home network
-   and enter its password. No firmware editing or USB connection to a computer
-   is needed for this step.
-2. Rejoin your home Wi-Fi. Open the address on the OLED or the `.local` address
-   on the card. Log in as **admin**, with the card's setup password. The settings
-   page is served by the device and works without an internet connection.
-3. In Home Assistant, open **Settings → Devices & services** and configure the
-   discovered ESPHome device. If it is not discovered, add the ESPHome integration
-   and enter the device's IP. Use the **API encryption key** on the card when asked.
-4. On the device's settings page, enter up to three **Power 1/2/3 Entity** IDs
-   from Home Assistant, such as `sensor.grid_power`. Find an entity ID in that
-   entity's settings in HA. Select each source's **W** or **kW** unit. Leave unused
-   inputs blank. Press **Apply Input Settings and Restart**, then refresh after
-   the device reconnects. You can also edit these settings through HA.
-5. Check **Power Input 1/2/3** against the originals. kW inputs are converted to W.
-   Signs are preserved unless you set **Power N Sign** to **Inverted**; see
-   [Virtual CT setup](#virtual-ct-setup) for the sign each CT needs. Power Input N is sent as CTN; see
-   [Virtual CT setup](#virtual-ct-setup) for which input goes where. **Power Inputs Recently Received** indicates that all configured
-   inputs delivered finite values within **Input Receipt Timeout** (120 seconds
-   by default). This measures receipt age, not source measurement age. HA may not
-   resend unchanged readings, so constant inputs can time out.
+### Prerequisites
 
-The builder supplies the setup card. Each device has its own credentials and
-stable virtual serial; retain the card for future setup and recovery.
+- The device's private setup card. The person who built the device supplies
+  it. Each device has its own credentials and a fixed virtual serial number.
+  Keep the card for future setup and recovery.
+- The password for your 2.4 GHz Wi-Fi network.
+- A Home Assistant installation.
+- A phone or computer with Wi-Fi.
 
-## Radio reception and pairing test
+You don't need to edit firmware or connect the device to a computer.
 
-Press **Find Channel**. With **Reference Harvi Serial** left at 0, the scan locks
-onto the first channel carrying a Zappi's status broadcasts; it also runs at
-first boot. If a working genuine Harvi is still installed, enter its serial
-under **Reference Harvi Serial** first: the scan then waits for two distinct
-packets from that Harvi. Your real Harvi needs enough CT current to power its
-transmitter. The scan takes up to 96 seconds. Alternatively, choose **Receive
-Frequency** manually, for example if a neighbour's myenergi system is on another
-channel. Candidate numbers are not verified Zappi channel labels.
+### Connect the device to Wi-Fi
 
-Open **Linked Devices → Pairing** on Zappi. Press **Start Pairing** on the device's
-page or in HA. You can also hold and release BOOT for 0.5–3 seconds after startup.
-Select the virtual serial shown on the OLED/card and confirm it on Zappi.
-Advertisements stop after two minutes, on transmit failure, or when you press
-**Stop Pairing**. A sent counter alone does not confirm Zappi acceptance.
+1. Attach the 868 MHz antenna, then power the board with a USB cable.
+2. On your phone, join the Wi-Fi network named **Virtual CT Harvester …**. Use
+   the setup Wi-Fi password from the setup card.
 
-Pairing advertises no CT readings. Measurements start only when you turn on
-**Virtual CT Output** (below).
+   The device broadcasts this setup network whenever it has no working Wi-Fi
+   connection. If your phone reports that the network has no internet access,
+   stay connected.
+3. If the Wi-Fi setup page doesn't open automatically, go to
+   `http://192.168.4.1`.
+4. Select your home network and enter its password.
+5. Reconnect your phone to your home Wi-Fi network.
 
-## Virtual CT setup
+### Open the settings page
 
-| Input | Sent as | Set on the Zappi | Sign |
+1. Go to the address shown on the OLED, or to the `.local` address on the setup
+   card.
+2. Sign in with the username `admin` and the settings password from the setup
+   card.
+
+The device serves the settings page itself, so the page works without an
+internet connection.
+
+### Add the device to Home Assistant
+
+1. In Home Assistant, go to **Settings > Devices & services**.
+2. Configure the discovered ESPHome device. If Home Assistant doesn't discover
+   it, add the ESPHome integration and enter the device's IP address.
+3. When prompted, enter the **Home Assistant API encryption key** from the
+   setup card.
+
+### Configure power inputs
+
+Each power input reads one Home Assistant power sensor. The device sends
+**Power input 1** as CT1, **Power input 2** as CT2, and **Power input 3** as
+CT3. To decide which sensor goes in each input, see
+[Configure the virtual CTs](#configure-the-virtual-cts).
+
+1. On the device's settings page, enter a Home Assistant entity ID in
+   **Power 1 entity**, **Power 2 entity**, and **Power 3 entity**, for example
+   `sensor.grid_power`. Leave unused inputs blank.
+
+   To find an entity ID, open the entity's settings in Home Assistant.
+2. For each input, set **Power N source unit** to **W** or **kW** to match the
+   source sensor. The device converts kW readings to W.
+3. The device keeps each reading's sign unless you set **Power N sign** to
+   **Inverted**. Invert a source if its sign is the opposite of what its CT
+   needs. For the sign each CT needs, see
+   [Configure the virtual CTs](#configure-the-virtual-cts).
+4. Click **Apply input settings and restart**. When the device reconnects,
+   refresh the page.
+5. Compare **Power input 1**, **Power input 2**, and **Power input 3** with the
+   source sensors.
+
+You can also change these settings from the device's page in Home Assistant.
+
+**Power inputs recently received** turns on when every configured input has
+delivered a numeric value within **Input receipt timeout** (120 seconds by
+default). It measures when the device last received a value, not when the
+source last took a measurement. Home Assistant might not resend a reading that
+hasn't changed, so an input with a constant value can time out.
+
+## Find the radio channel
+
+The device must listen on the same radio channel as your Zappi. It scans for
+the channel automatically at first boot. To scan again, do one of the
+following:
+
+- **If no working genuine Harvi is installed:** leave **Reference Harvi
+  serial** at `0` and click **Find channel**. The scan stops at the first
+  channel that carries status broadcasts from a Zappi.
+- **If a working genuine Harvi is still installed:** enter its serial number in
+  **Reference Harvi serial**, then click **Find channel**. The scan waits for
+  two distinct packets from that Harvi. The Harvi needs enough current through
+  its CT clamps to power its transmitter.
+
+The scan takes up to 96 seconds.
+
+To set the channel manually, choose a value in **Receive frequency**. Do this,
+for example, if a neighbor's myenergi system uses a different channel and the
+scan finds that one first. The candidate numbers in the list aren't verified
+Zappi channel labels.
+
+## Pair with the Zappi
+
+Pairing registers the device's virtual serial number on the Zappi. Pairing
+packets contain no CT readings. The device sends measurements only after you
+turn on **Virtual CT output**.
+
+1. On the Zappi, open **Linked Devices > Pairing**.
+2. Start pairing on the device in one of these ways:
+   - Click **Start pairing** on the settings page or in Home Assistant.
+   - After the device has started, press and hold the **BOOT** button for
+     0.5–3 seconds, then release it.
+3. On the Zappi, select the virtual serial number shown on the OLED and the
+   setup card, then confirm it.
+
+The device sends pairing packets for two minutes. It stops sooner if a
+transmission fails or if you click **Stop pairing**.
+
+> [!NOTE]
+> **Pairing packets sent** counts the packets the device transmitted. It
+> doesn't confirm that the Zappi accepted the pairing.
+
+## Configure the virtual CTs
+
+Set each Zappi CT type and source sign as shown in the following table:
+
+| Input | Sent as | Zappi CT type | Sign |
 | --- | --- | --- | --- |
-| Power 1 | CT1 | Grid | positive import, negative export |
-| Power 2 | CT2 | **Generation (required)** | positive generation |
-| Power 3 | CT3 | **AC Battery** (or Storage, or any other type) | battery: positive discharging, negative charging |
+| Power 1 | CT1 | Grid | Positive for import, negative for export |
+| Power 2 | CT2 | **Generation (required)** | Positive for generation |
+| Power 3 | CT3 | **AC Battery**, Storage, or any other type | Positive for discharging, negative for charging |
 
-myenergi CTs are positive when power flows towards the house. Many battery
-sensors report charging as positive (Anker SOLIX does, for example); set
-**Power 3 Sign** to **Inverted** for those. With the wrong sign, the myenergi app
+myenergi CTs read positive when power flows toward the house. Many battery
+sensors, such as Anker SOLIX, report charging as positive. For those sensors,
+set **Power 3 sign** to **Inverted**. If the sign is wrong, the myenergi app
 shows a charging battery as supplying the house and overstates the house load.
 
-1. Pair (above). On the Zappi, set this device's CT2 to **Generation** and
-   CT1/CT3 as in the table. CT2 must be the **only** Generation CT on that
-   Zappi: its generation total is the board's phase feedback. Leave Power 2
-   blank if you have no generation; CT2 must still be set to Generation.
-2. Remove the Grid role from any other Grid CT, or the Zappi adds both.
-3. Turn on **Virtual CT Output**. Gateway Status shows *waiting for the Zappi to
-   list this serial*, then *acquiring phase*, then *phase locked, output live*.
-   Lock takes 10–45 s. The OLED shows `CT OUT - LOCKED`.
-4. Once no other device has a Grid CT on the Zappi, turn on **Grid Total Is
-   Virtual Only**. The grid total then adds a second feedback channel.
-5. Compare the Zappi's readings with your inputs, in both import and export.
+### Prerequisites
 
-## Solar and battery in the myenergi app
+- The device is paired with the Zappi. See [Pair with the Zappi](#pair-with-the-zappi).
 
-The app's energy-flow screen surrounds a leaf (the green-energy share) with
-bubbles. Every flow is drawn through the leaf. Grid, house and chargers always
-appear. The **solar** bubble appears only when a CT on the account has type
-Generation, and the **battery** bubble only when one has type **AC Battery**.
-Storage shows a separate storage icon, and Gen & Battery a combined one. These
-types come from the myenergi cloud, which learns them from the Zappi. That
-causes two traps:
+### Steps
 
-- **This device must be the only Harvi linked to the Zappi.** The Zappi reports
-  one Harvi's CT types per update: the first linked Harvi that has new data. A
-  genuine Harvi linked ahead of this device is nearly always reported instead.
-  This device's types then never reach the cloud, even though the Zappi uses
-  its readings. In one installation, about 3,000 consecutive uplinks all
-  carried the genuine Harvi.
-- **The serial must be one the cloud accepts.** The myenergi website rejected a
-  generated serial as invalid. Reusing a retired genuine Harvi's serial is
-  the verified route. A generated serial as the only Harvi has not been tested.
+1. On the Zappi, set this device's CT2 to **Generation**, and set CT1 and CT3
+   as shown in the table.
 
-To replace a genuine Harvi:
+   CT2 must be the only Generation CT on the Zappi, because the device uses the
+   Zappi's generation total as phase feedback. If you have no generation, leave
+   **Power 2 entity** blank, but still set CT2 to **Generation**.
+2. If any other device has a Grid CT on the Zappi, change that CT to a
+   different type. Otherwise the Zappi adds both grid readings together.
+3. Turn on **Virtual CT output**. **Gateway status** shows these states in
+   order:
+   1. `Virtual CT: waiting for the Zappi to list this serial`
+   2. `Virtual CT: acquiring phase, CT1/CT3 withheld`
+   3. `Virtual CT: phase locked, output live`
 
-1. Retire the genuine Harvi permanently. Unclip all of its CT clamps: it powers
-   itself from them. If both transmit the same serial, the Zappi mixes their
-   readings.
+   Phase lock means the device has matched its readings to the Zappi's mains
+   phase. It takes 10–45 seconds. The OLED then shows `CT out: locked`.
+4. Turn on **Grid total is virtual only**. Do this only when no other device
+   has a Grid CT on the Zappi. The device then uses the Zappi's grid total as a
+   second feedback channel.
+5. Compare the Zappi's readings with your inputs, both while you import power
+   and while you export it.
+
+## Show solar and battery in the myenergi app
+
+The myenergi app's energy-flow screen shows a leaf, which represents the
+green-energy share, surrounded by bubbles. The app draws every flow through the
+leaf. The grid, house, and charger bubbles always appear. The other bubbles
+depend on the CT types on your account:
+
+- The **solar** bubble appears only when a CT has type Generation.
+- The **battery** bubble appears only when a CT has type AC Battery.
+- The Storage type shows a separate storage icon, and Gen & Battery shows a
+  combined icon.
+
+The myenergi cloud learns these types from the Zappi. For the bubbles to
+appear, both of the following must be true:
+
+- **This device is the only Harvi linked to the Zappi.** In each update, the
+  Zappi reports the CT types of one Harvi only: the first linked Harvi that has
+  new data. If a genuine Harvi is linked ahead of this device, the Zappi nearly
+  always reports the genuine Harvi. This device's CT types then never reach the
+  cloud, even though the Zappi uses its readings. In one installation, about
+  3,000 consecutive cloud updates all reported the genuine Harvi.
+- **The myenergi cloud accepts the device's serial number.** The myenergi
+  website rejected a generated serial number as invalid. Reusing the serial
+  number of a retired genuine Harvi works. Using a generated serial number on
+  the only linked Harvi hasn't been tested.
+
+### Replace a genuine Harvi with this device
+
+> [!WARNING]
+> Never let a genuine Harvi and this device transmit the same serial number.
+> The Zappi mixes their readings.
+
+1. Retire the genuine Harvi permanently by unclipping all of its CT clamps.
+   The Harvi powers itself from its clamps, so it stops transmitting.
 2. On the Zappi, remove every Harvi from **Linked Devices**.
-3. Give this device the genuine Harvi's serial (printed on its label, and shown
-   on the Zappi's Linked Devices list). For a new unit, run
-   `python prepare_device.py --serial NUMBER`. For an existing unit, change
-   `virtual_harvi_serial` in its `secrets.yaml`, keeping the other values. Then
-   build and flash. Leave **Reference Harvi Serial** at 0.
-4. Pair and set the CT types as in [Virtual CT setup](#virtual-ct-setup).
-5. Check that the app shows solar and battery bubbles, and that the house
-   figure is roughly solar + grid import − battery charging − charger power.
+3. Give this device the genuine Harvi's serial number. The serial number is
+   printed on the Harvi's label and shown in the Zappi's **Linked Devices**
+   list.
+   - **New device:** run `python prepare_device.py --serial NUMBER`.
+   - **Existing device:** change `virtual_harvi_serial` in the device's
+     `secrets.yaml` file. Keep the other values.
+4. Build and flash the device. See
+   [Build and flash your own device](#build-and-flash-your-own-device).
+5. Leave **Reference Harvi serial** at `0`.
+6. Pair the device and set its CT types. See
+   [Pair with the Zappi](#pair-with-the-zappi) and
+   [Configure the virtual CTs](#configure-the-virtual-cts).
+7. In the myenergi app, check that the solar and battery bubbles appear. Check
+   that the house figure is roughly equal to solar + grid import − battery
+   charging − charger power.
 
-The Zappi accepts a linked serial from any transmitter: it keeps no pairing key,
-and in the firmware emulator it accepted backward and repeated packet sequences. Zappi CT type codes, as sent to the
-cloud: 0 None, 1 Grid, 2 Generation, 3 Storage, 4 Gen & Battery, 5 Internal
-Load, 6 Monitor, 7 AC Battery. Not analysed: whether the Zappi's own charging
-behaviour differs between Storage and AC Battery.
+### Zappi CT type reference
+
+The Zappi accepts a linked serial number from any transmitter, because it
+stores no pairing key. In tests against an emulator of the Zappi firmware, it
+also accepted packet sequence numbers that went backward or repeated.
+
+The Zappi sends these CT type codes to the myenergi cloud:
+
+| Code | CT type |
+| --- | --- |
+| 0 | None |
+| 1 | Grid |
+| 2 | Generation |
+| 3 | Storage |
+| 4 | Gen & Battery |
+| 5 | Internal Load |
+| 6 | Monitor |
+| 7 | AC Battery |
+
+Whether the Zappi's own charging behavior differs between Storage and AC
+Battery hasn't been analyzed.
 
 ## How it works
 
-The Zappi computes `power = V × floor(|phasor| / 1.19) × cos(angle − its mains
-phase)` for each CT. So each reading has to be rotated to the Zappi's mains
-phase at the moment the packet arrives.
+For each CT, the Zappi computes power with this formula:
 
-- **Feedback:** the Zappi broadcasts its grid and generation totals over RF once
-  a second. The board learns its own Zappi from the record that lists this
-  virtual serial. Frames from neighbouring installations are ignored.
-- **Pilot:** CT2 always carries an extra 300 W at 90° ± 3° to its measurement.
-  When locked, this shifts the generation reading by about ±16 W. Any phase
-  error shows up in the generation total, so the loop stays observable at
-  night.
-- **Acquisition:** a least-squares fit over mains frequency, using golden-angle
-  phase steps. **Tracking:** a Kalman filter on phase and frequency.
-- **Timing:** one packet 450 ms after each heard total, in a quiet slot. The
-  radio driver starts transmitting at a scheduled microsecond, so the angle is
-  computed for the exact send time.
-
-## Safety behaviour
-
-- CT1 and CT3 are sent **only while the phase is locked**. Otherwise they are
-  omitted, and the Zappi reads 0. A reading at an unknown phase is never sent.
-- If feedback stops briefly while the tracker is still consistent, readings
-  continue on the last good phase for up to 15 s while its uncertainty stays
-  under 25° (`CT OUT - HOLDING`). If the feedback shows the phase has moved,
-  they are withheld at once: a held phase is then wrong and can flip the sign.
-- While acquiring, CT2 carries only the pilot, so it reads within ±300 W.
-- If a configured input has no finite value since the HA connection
-  (re)started, all measurements are withheld and the pilot keeps the lock.
-  An unconfigured input is sent as 0 W.
-- If the board stops transmitting, the Zappi holds the last values for at least
-  34 s, then clears them.
-- Airtime: about 4 ms per packet, one packet every 1–3 s, at 2 dBm.
-- Residual risk: lock is inferred, not measured against mains. A source that
-  freezes in HA without going unavailable keeps being sent. Re-check the Grid
-  reading after any firmware change before relying on it for charging control.
-
-Weak reception of the Zappi's broadcasts is the main cause of lock loss.
-Keep the antenna vertical and clear of inverters and metal enclosures.
-Diagnostics: **Phase Locked**, **Phase Uncertainty**, **Phase Fit Gain** (≈ 1.00
-when the scaling is right), **Virtual CT Held Packets**, **Radio Noise Floor**,
-**Receiver Restarts** and **Zappi Serial**.
-
-## Recovery
-
-- **Wi-Fi changed or unavailable:** reconnect to the setup network and enter
-  the new Wi-Fi details. Its password is on the original card.
-- **Reset saved settings:** after normal startup, hold BOOT for 10 seconds.
-  This erases saved Wi-Fi, input entities, units and frequency settings and returns
-  to setup. The device's built-in identity and card credentials stay unchanged.
-  Do not hold BOOT while powering on: that enters the ESP32 USB bootloader.
-- **No power inputs:** check the HA integration connection, entity IDs and units;
-  press Apply Input Settings and Restart after editing. Missing inputs do not
-  prevent a pairing test.
-- **No packets / Radio failed:** check the board variant, antenna and frequency.
-  A blank OLED can be an I²C/display issue; USB logs work independently.
-
-Allow a minute for ordinary setting changes to be saved before unplugging.
-Apply Input Settings and Restart explicitly saves pending settings first.
-
-## Build and flash your own
-
-The complete image has been build-checked with **ESPHome 2026.9.0**.
-Use Python **3.12–3.14** and the pinned ESPHome version. Download or clone this
-repository into its own directory, then:
-
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-python prepare_device.py
-esphome compile virtual-ct-harvester.yaml
-esphome upload virtual-ct-harvester.yaml --device /dev/ttyUSB0
+```text
+power = V × floor(|phasor| / 1.19) × cos(angle − mains phase)
 ```
 
-Replace the port with your board's port. The first build downloads the ESP32
-build toolchain and web interface assets. The font and radio component are bundled.
-`prepare_device.py` creates unique `secrets.yaml` and a private `device-card.txt`;
-it refuses to overwrite existing credentials. An optional `--serial NUMBER`
-selects a specific nonzero 24-bit identity. Use a retired genuine Harvi's serial to
-get the app's solar and battery bubbles (see
-[Solar and battery in the myenergi app](#solar-and-battery-in-the-myenergi-app)), and
-never one that another working device still transmits.
-Never flash multiple units with the same generated secrets: prepare a separate
-working directory and setup card per unit. Preserve each unit's secrets for updates.
+In this formula:
 
-Earlier checkouts used `harvi-radio.yaml`; the main file is now
-`virtual-ct-harvester.yaml`. Existing secrets remain compatible: keep the same keys,
-virtual serial and device name when updating an already configured unit.
+- `V` is the mains voltage.
+- `phasor` is the CT reading as the device sends it. A phasor describes an AC
+  quantity with a magnitude and an `angle`.
+- `mains phase` is the Zappi's own mains phase when the packet arrives.
 
-For ESPHome Device Builder, copy the YAML, packages, components, fonts and that
-unit's secrets into its configuration directory, retaining existing unrelated
-secrets. Choose **Install** and USB for the first flash. A separate USB installer
-needs the **factory** image; later OTA updates use that unit's existing credentials.
-Do not distribute credential-bearing binaries publicly. Example secrets are
-only for build validation and must not be used for real devices.
+The board isn't connected to mains, so it can't measure that phase directly.
+Instead, it rotates each reading to the Zappi's predicted mains phase at the
+moment the packet arrives. It predicts the phase as follows:
+
+- **Feedback:** the Zappi broadcasts its grid and generation totals over radio
+  once per second. The device identifies its own Zappi from the record that
+  lists this device's virtual serial number, and ignores broadcasts from
+  neighboring installations.
+- **Pilot:** CT2 always carries an extra 300 W signal, called the pilot, at
+  90° ± 3° to its measurement. When the phase is locked, the pilot shifts the
+  generation reading by about ±16 W. Any phase error appears in the generation
+  total, so the device can track the phase even at night, when there's no
+  solar generation.
+- **Acquisition:** to find the phase, the device runs a least-squares fit,
+  which finds the phase and frequency that best match the feedback, across
+  mains frequencies. Between packets, it steps the sent angle by the
+  golden angle (about 137.5°) so that the samples cover many different phases.
+- **Tracking:** after acquisition, a Kalman filter tracks the phase and
+  frequency. A Kalman filter is an algorithm that updates an estimate, and its
+  uncertainty, with each new measurement.
+- **Timing:** the device sends one packet 450 ms after each total it hears,
+  when no other device is transmitting. The radio driver starts each
+  transmission at a scheduled microsecond, so the device computes the angle for
+  the exact send time.
+
+## Safety behavior
+
+- The device sends CT1 and CT3 only while the phase is locked. Otherwise it
+  omits them, and the Zappi reads 0. The device never sends a reading at an
+  unknown phase.
+- If feedback stops briefly and the tracker is still consistent, the device
+  keeps sending readings on the last good phase for up to 15 seconds, while
+  the phase uncertainty stays under 25°. The OLED shows `CT out: holding`.
+  If the feedback shows that the phase has moved, the device withholds the
+  readings immediately, because the held phase is then wrong and can flip a
+  reading's sign.
+- While the device acquires the phase, CT2 carries only the pilot, so the
+  Zappi's CT2 reading stays within ±300 W.
+- If any configured input has had no numeric value since the Home Assistant
+  connection last started, the device withholds all measurements. The pilot
+  keeps the phase locked. The device sends an unconfigured input as 0 W.
+- If the device stops transmitting, the Zappi keeps the last values for at
+  least 34 seconds, then clears them.
+- Each packet takes about 4 ms of airtime. The device sends one packet every
+  1–3 seconds, at a transmit power of 2 decibel-milliwatts (dBm).
+
+### Known limitations
+
+- The device infers phase lock from feedback. It doesn't measure the phase
+  against mains.
+- If a source sensor stops updating in Home Assistant without becoming
+  unavailable, the device keeps sending its last value.
+- After any firmware change, check the Grid reading again before you rely on it
+  for charging control.
+
+## Monitor the device
+
+Weak reception of the Zappi's broadcasts is the main cause of lost phase lock.
+Keep the antenna vertical and away from inverters and metal enclosures.
+
+Use these diagnostic entities to check the device:
+
+| Entity | Shows |
+| --- | --- |
+| **Gateway status** | The device's current state |
+| **Phase locked** | Whether the phase is locked and output is live |
+| **Phase uncertainty** | The estimated phase error, in degrees |
+| **Phase fit gain** | The fitted scaling. A value of about 1.00 means the scaling is correct. |
+| **Virtual CT held packets** | The number of packets sent on a held phase |
+| **Radio noise floor** | The channel noise between packets, in dBm |
+| **Receiver restarts** | The number of times the device restarted its receiver after 10 seconds without packets |
+| **Zappi serial** | The serial number of the Zappi that lists this device |
+
+## Troubleshooting
+
+### The Wi-Fi network changed or is unavailable
+
+Join the device's setup network again and enter the new Wi-Fi details. The
+setup Wi-Fi password is on the original setup card.
+
+### Reset saved settings
+
+After the device has started normally, hold the **BOOT** button for 10
+seconds. The device returns to setup.
+
+> [!CAUTION]
+> Resetting erases all saved settings, including Wi-Fi, input entities, units,
+> and frequency settings. This can't be undone. The device's built-in identity
+> and the credentials on the setup card don't change.
+
+> [!NOTE]
+> Don't hold **BOOT** while you power on the board. That starts the ESP32 USB
+> bootloader instead.
+
+### The power inputs show no values
+
+Check the device's connection to the Home Assistant integration, the entity IDs,
+and the units. After you edit them, click **Apply input settings and restart**.
+
+Missing inputs don't prevent a pairing test.
+
+### No packets are received, or the gateway status shows "Radio failed"
+
+Check the board variant, the antenna, and the receive frequency.
+
+### The OLED is blank
+
+The cause might be an I²C (Inter-Integrated Circuit) bus or display problem.
+USB logs still work.
+
+### Settings are lost after unplugging
+
+The device can take up to a minute to save an ordinary setting change. Wait a
+minute before you unplug it. **Apply input settings and restart** saves pending
+settings before it restarts.
+
+## Build and flash your own device
+
+### Prerequisites
+
+- A supported board. See [Supported hardware](#supported-hardware).
+- Python 3.12, 3.13, or 3.14.
+- ESPHome 2026.9.0. The repository pins this version in `requirements.txt`,
+  and the complete image was build-checked with it.
+
+### Build and flash a new device
+
+1. Download or clone this repository into its own directory.
+2. Run the following commands from that directory:
+
+   ```sh
+   # Create and activate a Python virtual environment.
+   python3 -m venv .venv
+   . .venv/bin/activate
+
+   # Install the pinned ESPHome version.
+   pip install -r requirements.txt
+
+   # Generate unique credentials and a setup card for this device.
+   python prepare_device.py
+
+   # Build the firmware, then flash it over USB.
+   esphome compile virtual-ct-harvester.yaml
+   esphome upload virtual-ct-harvester.yaml --device /dev/ttyUSB0
+   ```
+
+   Replace `/dev/ttyUSB0` with your board's serial port.
+
+The first build downloads the ESP32 build toolchain and the web interface
+assets. The repository includes the font and the radio component.
+
+`prepare_device.py` creates a unique `secrets.yaml` file and a private
+`device-card.txt` setup card. It doesn't overwrite existing credentials.
+
+To set a specific serial number, add `--serial NUMBER`, where `NUMBER` is
+between 1 and 16777215 (a nonzero 24-bit value). To get the solar and battery
+bubbles in the myenergi app, use the serial number of a retired genuine Harvi.
+For details, see
+[Show solar and battery in the myenergi app](#show-solar-and-battery-in-the-myenergi-app).
+Never use a serial number that another working device still transmits.
+
+> [!WARNING]
+> Don't flash more than one device with the same generated secrets. Use a
+> separate working directory and setup card for each device, and keep each
+> device's secrets for future updates.
+
+### Update a device built from an earlier version
+
+Earlier versions used `harvi-radio.yaml` as the main file. The main file is now
+`virtual-ct-harvester.yaml`. Existing secrets still work. When you update a
+configured device, keep its existing keys, virtual serial number, and device
+name.
+
+### Use ESPHome Device Builder
+
+1. Copy the following into the Device Builder configuration directory:
+   - `virtual-ct-harvester.yaml`
+   - The `packages`, `components`, and `fonts` directories
+   - The device's secrets. Add them to the existing `secrets.yaml` file, and
+     keep any unrelated secrets that are already there.
+2. For the first flash, click **Install**, then choose USB.
+
+To use a separate USB installer, download the **factory** image. Later
+over-the-air (OTA) updates use the device's existing credentials.
+
+> [!WARNING]
+> Firmware binaries contain the device's credentials. Don't share them
+> publicly. The values in `secrets.example.yaml` are only for build validation.
+> Don't use them on real devices.
+
+### Hardware reference
+
+The board connects its components to these general-purpose input/output (GPIO)
+pins. The radio uses the Serial Peripheral Interface (SPI) bus.
 
 | Hardware connection | GPIO |
 | --- | --- |
@@ -240,9 +493,17 @@ only for build validation and must not be used for real devices.
 | OLED SDA / SCL, address 0x3c | 21 / 22 |
 | BOOT button | 0 |
 
-Use the classic ESP32/SX1276 868 MHz board above. SX1262, ESP32-S3 and 433 MHz
-variants need different support. The radio uses **FSK**, not LoRa. GPIO5 is a
-manufacturer-wired strapping pin; avoid adding loads to it during startup. No SD
-card is needed. All transmissions use 2 dBm.
+MISO and MOSI are the SPI data lines, CS is the radio's chip select, and DIO0 is
+the radio's interrupt line. SDA and SCL are the I²C data and clock lines.
 
-[Licenses and third-party notices](NOTICE.md).
+- The radio uses frequency-shift keying (FSK), not LoRa (long range)
+  modulation.
+- All transmissions use 2 dBm.
+- GPIO5 is a strapping pin, which the ESP32 reads at startup to choose its boot
+  mode. The manufacturer wires it to the radio. Don't connect other loads to
+  it, because they can affect startup.
+- The device doesn't need an SD card.
+
+## Licenses
+
+For license details and third-party notices, see [NOTICE.md](NOTICE.md).
