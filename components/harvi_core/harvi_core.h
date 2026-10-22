@@ -545,7 +545,12 @@ class VirtualCT {
     // Zappi's 1 s status ticks, and 50 Hz has an integer number of cycles).
     const double base = rotate ? tracker_.predict(at_us) : std::fmod(sequence_ * 137.50776, 360.0);
     if (output && nis_avg_ < 2.0) { hold_ = tracker_; hold_us_ = at_us; have_hold_ = true; }
-    const bool ride = !output && have_hold_ && int32_t(at_us - hold_us_) < int32_t(RIDE_US) &&
+    // Ride only through quiet gaps (tracker still consistent). After the
+    // feedback has shown a phase jump the held phase is wrong: in an overnight
+    // soak, holding then flipped the battery sign in 58 of 195 records,
+    // against 1 of 93 when the tracker was still consistent.
+    const bool ride = !output && have_hold_ && tracker_.tracking() && nis_avg_ < 4.0 &&
+                      int32_t(at_us - hold_us_) < int32_t(RIDE_US) &&
                       hold_.phase_sigma_at(at_us) < RIDE_SIGMA_DEG;
     const bool live = output || ride;
     const double value_base = output ? base : ride ? hold_.predict(at_us) : base;

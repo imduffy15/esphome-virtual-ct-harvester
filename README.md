@@ -108,9 +108,10 @@ phase at the moment the packet arrives.
 
 - CT1 and CT3 are sent **only while the phase is locked**. Otherwise they are
   omitted, and the Zappi reads 0. A reading at an unknown phase is never sent.
-- After a short lock loss, readings continue on the last good phase for up to
-  15 s while its uncertainty stays under 25° (`CT OUT - HOLDING`). Then they are
-  withheld.
+- If feedback stops briefly while the tracker is still consistent, readings
+  continue on the last good phase for up to 15 s while its uncertainty stays
+  under 25° (`CT OUT - HOLDING`). If the feedback shows the phase has moved,
+  they are withheld at once: a held phase is then wrong and can flip the sign.
 - While acquiring, CT2 carries only the pilot, so it reads within ±300 W.
 - If a configured input has no finite value since the HA connection
   (re)started, all measurements are withheld and the pilot keeps the lock.
