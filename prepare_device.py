@@ -9,7 +9,7 @@ import secrets
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--serial', type=int, help='Serial number for this device, from 1 to 16777215, for example a retired genuine Harvi serial number (see README.md). Default: a random serial number.')
+    parser.add_argument('--serial', type=int, help='Built-in serial number for this device, from 1 to 16777215. The owner can change it later on the device web page. Default: a random serial number.')
     args = parser.parse_args()
     serial = args.serial if args.serial is not None else secrets.randbelow(0xFFFFFF) + 1
     if not 1 <= serial <= 0xFFFFFF:
@@ -21,7 +21,6 @@ def main():
         parser.error('secrets.yaml or device-card.txt already exists. Keep the existing credentials, or prepare this device in a new directory.')
     api_key = base64.b64encode(secrets.token_bytes(32)).decode()
     setup_password = secrets.token_hex(8)
-    ota_password = secrets.token_hex(24)
     name = f'virtual-ct-harvester-{serial:06x}'
     ssid = f'Virtual CT Harvester {serial:06x}'
     yaml = f'''# Private credentials for this device only. Keep them for future updates.
@@ -29,7 +28,6 @@ device_name: "{name}"
 setup_ap_ssid: "{ssid}"
 setup_password: "{setup_password}"
 harvi_radio_api_key: "{api_key}"
-harvi_radio_ota_password: "{ota_password}"
 virtual_harvi_serial: {serial}
 '''
     instructions = f'''Virtual CT Harvester — private device setup card
@@ -43,22 +41,20 @@ Wi-Fi setup page: http://192.168.4.1
 
 After you join your home Wi-Fi network:
 Device address: http://{name}.local (or the IP address shown on the display)
-Settings username: admin
-Settings password: {setup_password}
-Home Assistant API encryption key: {api_key}
-Firmware update password: {ota_password}
+Web page username: admin
+Web page password: {setup_password}
+Encryption key (Home Assistant and firmware updates): {api_key}
 
 Set up the device:
-1. Add the device in the Home Assistant ESPHome integration.
-2. On the settings page, enter up to three power entity IDs and set each unit
-   to W or kW.
-3. Click Apply input settings and restart.
-4. Pair the device with the Zappi and set its CT types.
-5. Turn on Virtual CT output.
+1. Open the device address in a browser and sign in.
+2. Follow the setup guide on the page. It works with or without Home
+   Assistant.
+3. To use Home Assistant power readings, add the device in the Home Assistant
+   ESPHome integration with the encryption key above.
 For details, see README.md.
 
-Reset saved settings: after the device starts normally, hold BOOT for
-10 seconds. This erases saved settings, including Wi-Fi, and returns the device
+Reset saved settings: on the web page, click Reset to factory settings, or
+after the device starts normally, hold BOOT for 10 seconds. This erases saved settings, including Wi-Fi, and returns the device
 to setup. Don't hold BOOT while you power on the device.
 '''
     os.umask(0o077)

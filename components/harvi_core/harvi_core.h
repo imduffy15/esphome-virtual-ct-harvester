@@ -8,7 +8,11 @@
 #include <vector>
 
 namespace harvi {
-constexpr uint32_t SERIAL = HARVI_SERIAL;
+// The virtual Harvi serial. The build sets the factory default; the owner can
+// change it at runtime (for example to a retired genuine Harvi's serial).
+constexpr uint32_t BUILT_IN_SERIAL = HARVI_SERIAL;
+inline uint32_t SERIAL = BUILT_IN_SERIAL;
+inline bool valid_serial(uint32_t serial) { return serial >= 1 && serial <= 0xffffff; }
 constexpr std::array<uint32_t, 8> FREQUENCIES = {
     869534852, 869555000, 869795000, 869901063,
     868095000, 868231667, 868368333, 868505000};
@@ -695,39 +699,95 @@ inline bool valid_entity_id(const std::string &value) {
   return true;
 }
 
-// Receipt-age diagnostics only. They don't prove that the source measurement is fresh.
-class InputFreshness {
+// The three power readings sent as CT1-CT3 (grid, solar, and battery), in W.
+// They come from Home Assistant entities or from HTTP pushes.
+class PowerInputs {
  public:
-  void set_enabled(size_t channel, bool enabled) {
-    if (channel >= 3) return;
-    enabled_[channel] = enabled;
-    valid_[channel] = false;
+  enum class State : uint8_t { UNUSED, WAITING, NO_UNIT, BAD_UNIT, STALE, OK };
+  bool push_source{false};
+
+  // Home Assistant: an input is used when it has an entity. With scale 0, the
+  // unit comes from the entity's unit_of_measurement attribute.
+  void configure(size_t ch, bool has_entity, float scale, bool invert) {
+    if (ch >= 3) return;
+    auto &c = ch_[ch];
+    c.has_entity = has_entity; c.scale = scale; c.sign = invert ? -1.0f : 1.0f;
   }
-  void observe(size_t channel, uint32_t now, float value) {
-    if (channel >= 3) return;
-    valid_[channel] = std::isfinite(value);
-    updated_[channel] = now;
+  void observe_unit(size_t ch, const std::string &unit) {
+    if (ch >= 3 || unit.empty() || unit == "None" || unit == "unknown" || unit == "unavailable") return;
+    ch_[ch].unit = unit;
   }
-  bool fresh(uint32_t now, uint32_t timeout_ms) const {
-    bool any=false;
-    for (size_t i=0; i<3; ++i) {
-      if (!enabled_[i]) continue;
-      any=true;
-      if (!valid_[i] || uint32_t(now-updated_[i]) >= timeout_ms) return false;
+  void observe(size_t ch, uint32_t now, float raw) {
+    if (ch >= 3) return;
+    ch_[ch].raw = raw; ch_[ch].ha_valid = std::isfinite(raw); ch_[ch].ha_at = now; ch_[ch].ha_seen = true;
+  }
+  // Pushed readings are already in W. The sign setting still applies.
+  void push(size_t ch, uint32_t now, float watts) {
+    if (ch >= 3) return;
+    ch_[ch].pushed = watts; ch_[ch].push_at = now; ch_[ch].push_seen = true;
+    any_push_ = true;
+  }
+  // The Home Assistant connection started again, so values must arrive again.
+  void reset() { for (auto &c : ch_) c.ha_valid = false; }
+
+  // The configured or detected scale to W, or 0 when the unit is unknown or
+  // isn't a power unit.
+  float scale(size_t ch) const {
+    const auto &c = ch_[ch];
+    if (c.scale > 0) return c.scale;
+    if (c.unit == "W") return 1.0f;
+    if (c.unit == "kW") return 1000.0f;
+    if (c.unit == "MW") return 1e6f;
+    return 0.0f;
+  }
+  const std::string &unit(size_t ch) const { return ch_[ch].unit; }
+  State state(size_t ch, uint32_t now, uint32_t timeout_ms) const {
+    if (ch >= 3) return State::UNUSED;
+    const auto &c = ch_[ch];
+    if (push_source) {
+      if (!c.push_seen) return State::UNUSED;
+      return uint32_t(now - c.push_at) >= timeout_ms ? State::STALE : State::OK;
     }
-    return any;
+    if (!c.has_entity) return State::UNUSED;
+    if (!c.ha_valid) return State::WAITING;
+    if (scale(ch) == 0) return c.unit.empty() ? State::NO_UNIT : State::BAD_UNIT;
+    return State::OK;
   }
-  // True when every configured input has a finite value received since the
-  // API connection last started. Gates CT measurements. Unconfigured inputs
-  // are ignored.
-  bool enabled(size_t channel) const { return channel < 3 && enabled_[channel]; }
-  bool usable() const {
-    for (size_t i=0; i<3; ++i) if (enabled_[i] && !valid_[i]) return false;
+  // W for an OK input, 0 for an unused one, NAN otherwise.
+  float watts(size_t ch, uint32_t now, uint32_t timeout_ms) const {
+    switch (state(ch, now, timeout_ms)) {
+      case State::UNUSED: return 0.0f;
+      case State::OK: break;
+      default: return NAN;
+    }
+    const auto &c = ch_[ch];
+    return c.sign * (push_source ? c.pushed : c.raw * scale(ch));
+  }
+  // True when every used input has a usable value and, with pushes, at least
+  // one push has arrived. Gates CT measurements.
+  bool usable(uint32_t now, uint32_t timeout_ms) const {
+    if (push_source && !any_push_) return false;
+    for (size_t i = 0; i < 3; ++i) {
+      const auto st = state(i, now, timeout_ms);
+      if (st != State::UNUSED && st != State::OK) return false;
+    }
     return true;
   }
-  void reset() { valid_.fill(false); }
+  // Seconds since the last value arrived, or -1 if none has.
+  int32_t age_s(size_t ch, uint32_t now) const {
+    const auto &c = ch_[ch];
+    const bool seen = push_source ? c.push_seen : c.ha_seen;
+    return seen ? int32_t(uint32_t(now - (push_source ? c.push_at : c.ha_at)) / 1000) : -1;
+  }
+
  private:
-  std::array<uint32_t, 3> updated_{};
-  std::array<bool, 3> valid_{}, enabled_{};
+  struct Channel {
+    bool has_entity{false}, ha_valid{false}, ha_seen{false}, push_seen{false};
+    float scale{1.0f}, sign{1.0f}, raw{NAN}, pushed{0.0f};
+    uint32_t ha_at{0}, push_at{0};
+    std::string unit;
+  };
+  std::array<Channel, 3> ch_{};
+  bool any_push_{false};
 };
 }  // namespace harvi
