@@ -9,7 +9,7 @@ import secrets
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--serial', type=int, help='Optional identity, 1..16777215, e.g. a retired genuine Harvi serial (see README)')
+    parser.add_argument('--serial', type=int, help='Optional built-in identity, 1..16777215. The owner can also change it later on the web page.')
     args = parser.parse_args()
     serial = args.serial if args.serial is not None else secrets.randbelow(0xFFFFFF) + 1
     if not 1 <= serial <= 0xFFFFFF:
@@ -21,7 +21,6 @@ def main():
         parser.error('Existing secrets.yaml or device-card.txt found; preserve those credentials instead of regenerating them')
     api_key = base64.b64encode(secrets.token_bytes(32)).decode()
     setup_password = secrets.token_hex(8)
-    ota_password = secrets.token_hex(24)
     name = f'virtual-ct-harvester-{serial:06x}'
     ssid = f'Virtual CT Harvester {serial:06x}'
     yaml = f'''# Private, unique to this device. Preserve across updates.
@@ -29,7 +28,6 @@ device_name: "{name}"
 setup_ap_ssid: "{ssid}"
 setup_password: "{setup_password}"
 harvi_radio_api_key: "{api_key}"
-harvi_radio_ota_password: "{ota_password}"
 virtual_harvi_serial: {serial}
 '''
     instructions = f'''Virtual CT Harvester — private device setup card
@@ -41,19 +39,17 @@ Wi-Fi setup page: http://192.168.4.1
 
 After joining your home Wi-Fi:
 Device address: http://{name}.local (or use the IP shown on the OLED)
-Settings username: admin
-Settings password: {setup_password}
-Home Assistant API encryption key: {api_key}
-Firmware update password: {ota_password}
+Web page username: admin
+Web page password: {setup_password}
+Encryption key (Home Assistant and firmware updates): {api_key}
 
-Add the device in Home Assistant's ESPHome integration.
-Open the settings page, enter up to three power entity IDs and their W/kW units,
-then press Apply Input Settings and Restart.
+Open the device address in a browser and follow the setup guide there. It
+works with or without Home Assistant. To use Home Assistant readings, add the
+device in its ESPHome integration with the encryption key above.
 
 Wi-Fi recovery: hold BOOT for 10 seconds after normal startup to reset saved
 settings and return to setup. Do not hold BOOT while powering on.
-Keep this card private. Pair with the Zappi and set its CT types before turning
-on Virtual CT Output; see the README.
+Keep this card private.
 '''
     os.umask(0o077)
     for path, value in ((config, yaml), (card, instructions)):

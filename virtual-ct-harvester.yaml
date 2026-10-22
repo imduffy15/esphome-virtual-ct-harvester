@@ -1,12 +1,13 @@
 # LILYGO T3 LoRa32 V1.6.1 / ESP32 + SX1276, 868 MHz variant.
-# Virtual CT Harvester: pairing, plus three Home Assistant power inputs sent as
-# CT1-CT3 with the Zappi's mains phase tracked in closed loop from its own RF
-# status broadcasts. Radio profile, pairing and CT output verified over the air.
+# Virtual CT Harvester: pairing, plus three power readings (from Home Assistant
+# or pushed over HTTP) sent as CT1-CT3 with the Zappi's mains phase tracked in
+# closed loop from its own RF status broadcasts. Radio profile, pairing and CT
+# output verified over the air.
 external_components:
   - source:
       type: local
       path: components
-    components: [sx127x, harvi_core]
+    components: [sx127x, harvi_core, harvester_ui]
 
 harvi_core:
   serial: !secret virtual_harvi_serial
@@ -14,13 +15,21 @@ harvi_core:
 packages:
   power_inputs: !include packages/power-inputs.yaml
   commissioning: !include packages/commissioning.yaml
-  setup: !include packages/setup.yaml
+  web_app: !include packages/web-app.yaml
 
 esphome:
   name: !secret device_name
   friendly_name: Virtual CT Harvester
   min_version: 2026.9.0
+  project:
+    name: imduffy15.virtual-ct-harvester
+    version: "1.0.0"
   on_boot:
+    # Restored globals are loaded (priority 800) before this runs.
+    - priority: 700
+      then:
+        - lambda: |-
+            if (harvi::valid_serial(id(serial_override))) harvi::SERIAL = id(serial_override);
     - priority: -100
       then:
         - lambda: |-
@@ -36,13 +45,8 @@ esphome:
             } else {
               id(radio).set_frequency(id(stored_frequency));
               id(radio).configure();
-              for (size_t i=0; i<harvi::FREQUENCIES.size(); ++i) {
-                if (harvi::FREQUENCIES[i] != id(stored_frequency)) continue;
-                char option[64];
-                snprintf(option, sizeof(option), "%lu Hz - candidate %u",
-                         (unsigned long) id(stored_frequency), unsigned(i+1));
-                id(receive_frequency).publish_state(option);
-              }
+              for (size_t i=0; i<harvi::FREQUENCIES.size(); ++i)
+                if (harvi::FREQUENCIES[i] == id(stored_frequency)) id(receive_frequency).publish_state(i);
               id(gateway_status).publish_state("Listening");
             }
 
@@ -69,11 +73,12 @@ api:
     key: !secret harvi_radio_api_key
   reboot_timeout: 0s
   on_client_disconnected:
-    - lambda: id(input_freshness).reset();
+    - lambda: id(inputs).reset();
 
+# Updates are encrypted and authenticated with the API encryption key.
 ota:
   - platform: esphome
-    password: !secret harvi_radio_ota_password
+    encryption: {}
 
 spi:
   clk_pin: GPIO5
@@ -99,6 +104,11 @@ globals:
     type: uint32_t
     restore_value: true
     initial_value: '0'
+  # Owner-set virtual serial; 0 uses the built-in one (harvi::BUILT_IN_SERIAL).
+  - id: serial_override
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
 
 # Candidate frequencies, not verified channel assignments. Default is index 1.
 # A string selector avoids single-precision float rounding at 869 MHz.
@@ -106,7 +116,7 @@ select:
   - platform: template
     id: receive_frequency
     name: Receive Frequency
-    entity_category: config
+    internal: true
     options:
       - "869534852 Hz - candidate 1"
       - "869555000 Hz - candidate 2"
@@ -132,30 +142,28 @@ select:
           id(gateway_status).publish_state("Listening");
 
 sensor:
-  - platform: template
-    id: packet_count
-    name: Received Packets
-    accuracy_decimals: 0
-    entity_category: diagnostic
-    update_interval: 10s
-    lambda: return id(rx_count);
   - platform: uptime
+    id: uptime_s
     name: Uptime
     entity_category: diagnostic
-  - platform: template
-    name: Receiver Restarts
+    disabled_by_default: true
+  - platform: wifi_signal
+    id: wifi_rssi
+    name: Wi-Fi Signal
     entity_category: diagnostic
-    accuracy_decimals: 0
-    update_interval: 10s
-    lambda: return id(rx_restarts);
+    disabled_by_default: true
+    update_interval: 30s
   # SX1276 FSK RegRssiValue: -value/2 dBm. Sampled between packets it shows
   # the channel noise floor.
   - platform: template
+    id: noise_floor
     name: Radio Noise Floor
     entity_category: diagnostic
+    disabled_by_default: true
     unit_of_measurement: dBm
+    device_class: signal_strength
     accuracy_decimals: 1
-    update_interval: 2s
+    update_interval: 10s
     lambda: |-
       if (id(radio).is_failed()) return NAN;
       return -0.5f * id(radio).diagnostic_register(0x11);
@@ -164,19 +172,13 @@ text_sensor:
   - platform: template
     id: last_packet
     name: Last Radio Packet
-    entity_category: diagnostic
+    internal: true
     update_interval: never
   - platform: template
     id: last_harvi
     name: Last Candidate Harvi Packet
-    entity_category: diagnostic
+    internal: true
     update_interval: never
-  - platform: template
-    name: Zappi Serial
-    entity_category: diagnostic
-    update_interval: 60s
-    lambda: |-
-      return id(zappi_serial) ? std::to_string(id(zappi_serial)) : std::string("not heard yet");
 
 sx127x:
   id: radio
@@ -234,7 +236,7 @@ sx127x:
           if (harvi::parse_zappi_status(x, status)) {
             if (id(scan_state).observe_zappi(status)) {
               id(stored_frequency) = harvi::FREQUENCIES[id(scan_state).index];
-              id(gateway_status).publish_state("Zappi found; ready for pairing");
+              id(gateway_status).publish_state("Found the Zappi's channel");
               ESP_LOGI("harvi", "Zappi broadcasts found at %lu Hz", (unsigned long) id(stored_frequency));
             }
             // Learn our Zappi from the record it keeps for this virtual Harvi;
@@ -275,7 +277,7 @@ sx127x:
           ++id(valid_harvi_count);
           if (id(scan_state).observe(decoded)) {
             id(stored_frequency) = harvi::FREQUENCIES[id(scan_state).index];
-            id(gateway_status).publish_state("Harvi found; ready for pairing test");
+            id(gateway_status).publish_state("Found your Harvi's channel");
             ESP_LOGI("harvi", "Reference Harvi found at %lu Hz", (unsigned long) id(stored_frequency));
           }
           if (x.size() < 7) return;

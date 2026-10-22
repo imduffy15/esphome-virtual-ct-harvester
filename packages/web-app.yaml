@@ -1,0 +1,231 @@
+# The device's own web app at http://<device>/ (user admin, the setup card's
+# password): live status, guided setup and every setting, with or without
+# Home Assistant. Wi-Fi onboarding stays on the captive portal.
+captive_portal:
+
+improv_serial:
+
+mdns:
+  services:
+    - service: _http
+      protocol: _tcp
+      port: 80
+
+harvester_ui:
+  id: web_app
+  username: admin
+  password: !secret setup_password
+  status: |-
+    const uint32_t now = millis(), timeout = uint32_t(id(input_timeout).state * 1000);
+    auto put = [](JsonObject o, const char *key, double value) { if (std::isfinite(value)) o[key] = value; };
+    static const char *const states[] = {"radio_fault", "scanning", "pairing", "no_channel", "unpaired",
+        "off", "waiting_zappi", "waiting_readings", "acquiring", "holding", "live"};
+    root["state"] = id(device_state) >= 0 ? states[id(device_state)] : "starting";
+    root["status"] = id(status_text).state;
+    root["since"] = uint32_t(now - id(state_since_ms)) / 1000;
+    root["notice"] = id(gateway_status).state;
+    root["notice_age"] = uint32_t(now - id(notice_ms)) / 1000;
+    root["serial"] = harvi::SERIAL;
+    root["built_in_serial"] = harvi::BUILT_IN_SERIAL;
+    root["name"] = App.get_name();
+    root["version"] = ESPHOME_PROJECT_VERSION;
+    root["output"] = id(virtual_ct_output).state;
+    root["grid_only"] = id(grid_feedback).state;
+    root["reference"] = uint32_t(id(reference_serial).state);
+    auto pairing = root["pairing"].to<JsonObject>();
+    pairing["active"] = id(pair_state).active;
+    pairing["left"] = id(pair_state).seconds_left(now);
+    auto scan = root["scan"].to<JsonObject>();
+    scan["active"] = id(scan_state).active;
+    scan["step"] = id(scan_state).index + 1;
+    int channel = -1;
+    for (size_t i = 0; i < harvi::FREQUENCIES.size(); ++i)
+      if (harvi::FREQUENCIES[i] == id(stored_frequency)) channel = i;
+    root["channel"] = channel;
+    auto zappi = root["zappi"].to<JsonObject>();
+    zappi["serial"] = id(zappi_serial);
+    zappi["heard"] = id(zappi_device) >= 0;
+    auto in = root["inputs"].to<JsonObject>();
+    in["source"] = id(inputs).push_source ? "push" : "ha";
+    in["timeout"] = uint32_t(id(input_timeout).state);
+    in["usable"] = id(inputs).usable(now, timeout);
+    static const char *const input_states[] = {"unused", "waiting", "no_unit", "bad_unit", "stale", "ok"};
+    text::Text *sources[] = {id(source_1), id(source_2), id(source_3)};
+    select::Select *units[] = {id(source_1_units), id(source_2_units), id(source_3_units)};
+    select::Select *signs[] = {id(source_1_sign), id(source_2_sign), id(source_3_sign)};
+    auto channels = in["channels"].to<JsonArray>();
+    for (size_t i = 0; i < 3; ++i) {
+      auto c = channels.add<JsonObject>();
+      c["entity"] = sources[i]->state;
+      c["subscribed"] = id(active_sources)[i] == sources[i]->state;
+      c["unit"] = units[i]->current_option();
+      c["detected"] = id(inputs).unit(i);
+      c["invert"] = signs[i]->current_option() == std::string("Inverted");
+      c["state"] = input_states[int(id(inputs).state(i, now, timeout))];
+      put(c, "w", id(inputs).watts(i, now, timeout));
+      const int32_t age = id(inputs).age_s(i, now);
+      if (age >= 0) c["age"] = age;
+    }
+    const auto &ct = id(virtual_ct);
+    auto phase = root["phase"].to<JsonObject>();
+    phase["locked"] = ct.locked();
+    phase["holding"] = ct.riding();
+    if (ct.tracker().tracking()) {
+      put(phase, "sigma", ct.tracker().phase_sigma_deg());
+      put(phase, "hz", ct.tracker().frequency_hz());
+    }
+    if (ct.fit().valid) put(phase, "gain", ct.fit().gain);
+    phase["observations"] = ct.observations;
+    auto rf = root["radio"].to<JsonObject>();
+    rf["ok"] = !id(radio).is_failed();
+    rf["rx"] = id(rx_count);
+    rf["harvi_rx"] = id(valid_harvi_count);
+    rf["restarts"] = id(rx_restarts);
+    if (!id(radio).is_failed()) put(rf, "noise", -0.5f * id(radio).diagnostic_register(0x11));
+    rf["pairing_sent"] = id(pair_state).sent;
+    rf["pairing_failed"] = id(pair_state).failed;
+    rf["ct_sent"] = ct.sent;
+    rf["ct_failed"] = ct.failed;
+    rf["ct_late"] = ct.late;
+    rf["ct_held"] = ct.ride_packets;
+    rf["ambiguous"] = ct.ambiguous;
+    rf["last_packet"] = id(last_packet).state;
+    rf["last_harvi"] = id(last_harvi).state;
+    auto net = root["network"].to<JsonObject>();
+    net["ip"] = id(device_ip).state;
+    put(net, "rssi", id(wifi_rssi).state);
+    net["ha"] = api::global_api_server != nullptr && api::global_api_server->is_connected();
+    root["uptime"] = now / 1000;
+  on_command:
+    - lambda: |-
+        // Commands from the web page (POST /api/<command>, JSON body) and
+        // pushed readings (/api/power). Report problems with fail().
+        auto fail = [](const std::string &message) { id(web_app).fail(message); };
+        if (command == "output") {
+          if (args["on"] | false) id(virtual_ct_output).turn_on(); else id(virtual_ct_output).turn_off();
+        } else if (command == "pair") {
+          id(start_pairing).execute();
+        } else if (command == "stop_pairing") {
+          id(stop_pairing).execute();
+        } else if (command == "scan") {
+          id(start_scan).execute();
+        } else if (command == "channel") {
+          const int channel = args["channel"] | -1;
+          if (channel < 0 || channel >= int(harvi::FREQUENCIES.size())) return fail("Unknown channel");
+          id(receive_frequency).make_call().set_index(channel).perform();
+        } else if (command == "power") {
+          // Readings in W from another device or script.
+          if (!id(inputs).push_source)
+            return fail("Readings come from Home Assistant; set the source to HTTP push to send them here");
+          static const char *const names[] = {"grid", "solar", "battery"};
+          float values[3];
+          bool present[3], any = false;
+          for (size_t i = 0; i < 3; ++i) {
+            present[i] = !args[names[i]].isNull();
+            values[i] = args[names[i]] | NAN;
+            if (present[i] && !(std::fabs(values[i]) < 100000.0f))
+              return fail(std::string("Invalid ") + names[i] + " value: use watts, e.g. 1500 or -320");
+            any |= present[i];
+          }
+          if (!any) return fail("Send at least one of grid, solar or battery (in W)");
+          for (size_t i = 0; i < 3; ++i) if (present[i]) id(inputs).push(i, millis(), values[i]);
+        } else if (command == "settings") {
+          // Validate everything before changing anything.
+          JsonArrayConst channels = args["channels"];
+          if (channels.size() != 3) return fail("Expected three inputs");
+          for (JsonObjectConst c : channels) {
+            const std::string entity = c["entity"] | "";
+            if (!harvi::valid_entity_id(entity))
+              return fail("\"" + entity + "\" isn't a sensor entity ID; use e.g. sensor.grid_power, or leave it blank");
+            const std::string unit = c["unit"] | "Auto";
+            if (unit != "W" && unit != "kW" && unit != "Auto") return fail("Unit must be W, kW or Auto");
+          }
+          const std::string source = args["source"] | "ha";
+          if (source != "ha" && source != "push") return fail("Unknown readings source");
+          const int timeout = args["timeout"] | int(id(input_timeout).state);
+          if (timeout < 5 || timeout > 3600) return fail("Timeout must be 5-3600 seconds");
+          const long reference = args["reference"] | long(id(reference_serial).state);
+          if (reference < 0 || reference > 0xffffff) return fail("Harvi serials are 1-16777215 (0 for none)");
+          const long serial = args["serial"] | long(harvi::SERIAL);
+          if (!harvi::valid_serial(serial)) return fail("Serial must be 1-16777215");
+          if (reference != 0 && reference == serial) return fail("The reference Harvi serial must differ from this device's");
+
+          text::Text *sources[] = {id(source_1), id(source_2), id(source_3)};
+          select::Select *units[] = {id(source_1_units), id(source_2_units), id(source_3_units)};
+          select::Select *signs[] = {id(source_1_sign), id(source_2_sign), id(source_3_sign)};
+          bool restart = false;
+          for (size_t i = 0; i < 3; ++i) {
+            JsonObjectConst c = channels[i];
+            const std::string entity = c["entity"] | "";
+            if (entity != sources[i]->state) sources[i]->make_call().set_value(entity).perform();
+            // Home Assistant subscriptions are made at boot.
+            restart |= !entity.empty() && entity != id(active_sources)[i];
+            units[i]->make_call().set_option(c["unit"] | "Auto").perform();
+            signs[i]->make_call().set_option((c["invert"] | false) ? "Inverted" : "As received").perform();
+          }
+          id(input_source).make_call().set_option(source == "push" ? "HTTP push" : "Home Assistant").perform();
+          id(input_timeout).make_call().set_value(timeout).perform();
+          id(reference_serial).make_call().set_value(reference).perform();
+          if (args["grid_only"] | id(grid_feedback).state) id(grid_feedback).turn_on(); else id(grid_feedback).turn_off();
+          if (uint32_t(serial) != harvi::SERIAL) {
+            // A new identity must be paired again; forget the old Zappi record.
+            id(pair_state).stop();
+            id(virtual_ct).stop();
+            id(serial_override) = serial == long(harvi::BUILT_IN_SERIAL) ? 0 : uint32_t(serial);
+            harvi::SERIAL = serial;
+            id(zappi_device) = -1;
+            id(zappi_serial) = 0;
+            id(gateway_status).publish_state("Serial changed to " + std::to_string(serial) + "; pair with the Zappi again");
+          }
+          id(apply_input_settings).execute();
+          esphome::global_preferences->sync();
+          if (restart) {
+            id(web_app).restarting();
+            id(restart_device).execute();
+          }
+        } else if (command == "restart") {
+          id(web_app).restarting();
+          id(restart_device).execute();
+        } else if (command == "factory_reset") {
+          id(web_app).restarting();
+          id(reset_device).press();
+        } else {
+          fail("Unknown command");
+        }
+
+number:
+  - platform: template
+    id: reference_serial
+    name: Reference Harvi Serial
+    internal: true
+    min_value: 0
+    max_value: 16777215
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+
+button:
+  - platform: restart
+    name: Restart
+    entity_category: diagnostic
+  - platform: factory_reset
+    id: reset_device
+    internal: true
+
+script:
+  - id: restart_device
+    then:
+      - lambda: |-
+          id(pair_state).stop();
+          id(gateway_status).publish_state("Restarting");
+      - delay: 1s
+      - lambda: |-
+          esphome::global_preferences->sync();
+          esphome::App.safe_reboot();
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      id: device_ip
+      internal: true

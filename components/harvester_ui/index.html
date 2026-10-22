@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Virtual CT Harvester</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--text:#1b1f24;--muted:#5d6670;--line:#e2e5e9;--accent:#1f7a5a;--accent-text:#fff;--warn:#a15c00;--warn-bg:#fff4e0;--bad:#b42318;--bad-bg:#fdecea;--ok-bg:#e6f4ee;--info-bg:#eef2f7;--field:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#111417;--card:#1a1e23;--text:#e8eaed;--muted:#9aa3ad;--line:#2b3138;--accent:#3fb68b;--accent-text:#0b1a14;--warn:#f0b35a;--warn-bg:#2d2414;--bad:#ff8a80;--bad-bg:#2e1a19;--ok-bg:#15291f;--info-bg:#1d242c;--field:#14181c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px 16px 48px}
+header{display:flex;align-items:center;gap:12px;margin:4px 0 16px}
+header h1{font-size:18px;margin:0;font-weight:650}
+header .sub{color:var(--muted);font-size:13px}
+.mark{width:36px;height:36px;border-radius:10px;background:var(--accent);display:grid;place-items:center;flex:none}
+.mark svg{width:22px;height:22px;stroke:var(--accent-text)}
+.pill{margin-left:auto;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;background:var(--info-bg);white-space:nowrap}
+.pill.live{background:var(--ok-bg);color:var(--accent)}.pill.warn{background:var(--warn-bg);color:var(--warn)}.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.card h2{font-size:15px;margin:0 0 12px;font-weight:650}
+.hero h2{font-size:20px;margin-bottom:6px}
+.hero p{margin:0 0 12px;color:var(--muted)}
+.hero p:last-child{margin-bottom:0}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+button{font:inherit;font-weight:600;border-radius:9px;border:1px solid var(--line);background:var(--field);color:var(--text);padding:8px 14px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+button.danger{color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.tile{border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}
+.tile .label{font-size:13px;color:var(--muted)}
+.tile .value{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums;margin:2px 0}
+.tile .note{font-size:12px;color:var(--muted)}
+.tile .note.warn{color:var(--warn)}
+@media (max-width:520px){.tiles{grid-template-columns:1fr}.tile{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.tile .value{margin:0 0 0 auto;order:2}.tile .note{width:100%;order:3}}
+.switch-row{display:flex;align-items:center;gap:12px}
+.switch-row .grow{flex:1}
+.toggle{position:relative;width:48px;height:28px;flex:none}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.toggle span{position:absolute;inset:0;border-radius:999px;background:var(--line);transition:.15s;cursor:pointer}
+.toggle span:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 2px #0003}
+.toggle input:checked+span{background:var(--accent)}
+.toggle input:checked+span:before{transform:translateX(20px)}
+.toggle input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+.muted{color:var(--muted)}.small{font-size:13px}
+.steps{list-style:none;margin:0;padding:0}
+.steps li{display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.steps li:first-child{border-top:0;padding-top:0}
+.dot{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;font-weight:700;border:2px solid var(--line);color:var(--muted)}
+.steps li.done .dot{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+.steps li.now .dot{border-color:var(--accent);color:var(--accent)}
+.steps li>div>b{display:block}
+table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;padding:3px;gap:3px;margin-bottom:14px}
+.seg label{padding:6px 12px;border-radius:7px;cursor:pointer;font-weight:600;font-size:14px}
+.seg input{position:absolute;opacity:0;width:1px;height:1px}
+.seg input:focus-visible+label{outline:2px solid var(--accent);outline-offset:1px}
+.seg input:checked+label{background:var(--accent);color:var(--accent-text)}
+.input-row{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+.input-row .head{display:flex;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.input-row .head span{color:var(--muted);font-size:13px}
+.fields{display:grid;grid-template-columns:1fr 96px;gap:8px}
+@media (max-width:520px){.fields{grid-template-columns:1fr 84px}}
+input[type=text],input[type=number],select{font:inherit;width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--text)}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+label.check{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px}
+label.check input{width:18px;height:18px;accent-color:var(--accent)}
+.field{margin-bottom:12px}
+.field>label{display:block;font-weight:600;font-size:14px;margin-bottom:4px}
+.field .help{font-size:13px;color:var(--muted);margin-top:4px}
+details.card summary{cursor:pointer;font-weight:650;list-style:none;display:flex;justify-content:space-between}
+details.card summary::-webkit-details-marker{display:none}
+details.card summary:after{content:"+";color:var(--muted)}
+details.card[open] summary:after{content:"\2212"}
+details.card[open] summary{margin-bottom:12px}
+.kv{display:grid;grid-template-columns:minmax(120px,40%) 1fr;gap:6px 12px;font-size:13px}
+.kv div:nth-child(odd){color:var(--muted)}
+.kv div{overflow-wrap:anywhere}
+pre{background:var(--info-bg);border-radius:8px;padding:10px;overflow-x:auto;font-size:12px;margin:6px 0 0}
+code{font-size:.92em}
+.banner{border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:14px}
+.banner.bad{background:var(--bad-bg);color:var(--bad)}.banner.info{background:var(--info-bg)}.banner.warn{background:var(--warn-bg);color:var(--warn)}
+.savebar{display:flex;align-items:center;gap:12px;margin-top:6px;flex-wrap:wrap}
+.hidden{display:none!important}
+.overlay{position:fixed;inset:0;background:#0008;display:grid;place-items:center;padding:16px;z-index:9}
+.overlay .card{max-width:360px;text-align:center}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div>
+  <div><h1>Virtual CT Harvester</h1><div class="sub" id="sub">Connecting…</div></div>
+  <div class="pill" id="pill">…</div>
+</header>
+
+<div class="banner bad hidden" id="offline">Can't reach the device. Retrying…</div>
+<div class="banner info hidden" id="notice"></div>
+
+<section class="card hero">
+  <h2 id="hero-title">Connecting…</h2>
+  <p id="hero-text"></p>
+  <div class="actions" id="hero-actions"></div>
+</section>
+
+<section class="card">
+  <h2>Readings</h2>
+  <div class="tiles" id="tiles"></div>
+</section>
+
+<section class="card">
+  <div class="switch-row">
+    <div class="grow"><b>Send to Zappi</b><div class="small muted" id="output-note"></div></div>
+    <label class="toggle"><input type="checkbox" id="output" aria-label="Send to Zappi"><span></span></label>
+  </div>
+</section>
+
+<details class="card" id="setup-card">
+  <summary>Setup guide</summary>
+  <ol class="steps" id="steps"></ol>
+</details>
+
+<form class="card" id="settings" autocomplete="off">
+  <h2>Readings source</h2>
+  <div class="seg" role="radiogroup">
+    <input type="radio" name="source" id="src-ha" value="ha"><label for="src-ha">Home Assistant</label>
+    <input type="radio" name="source" id="src-push" value="push"><label for="src-push">HTTP push</label>
+  </div>
+  <p class="small muted" id="source-help"></p>
+  <div id="rows"></div>
+  <div class="field push-only">
+    <label for="timeout">Readings expire after (seconds)</label>
+    <input type="number" id="timeout" min="5" max="3600" step="1" style="max-width:140px">
+    <div class="help">If no new reading arrives in this time, the device stops sending measurements until one does.</div>
+  </div>
+  <details class="push-only" id="push-help">
+    <summary class="small" style="cursor:pointer;font-weight:600">How to send readings</summary>
+    <p class="small">POST the readings you have, in watts, at least every few seconds. Send them together in one request. Fields you leave out keep their last value; a field never sent is treated as not used (0 W).</p>
+    <pre id="curl"></pre>
+    <p class="small">Shelly Gen2+ script, for example on a Pro 3EM measuring the grid:</p>
+    <pre id="shelly"></pre>
+  </details>
+
+  <details style="margin-top:14px" id="advanced">
+    <summary class="small" style="cursor:pointer;font-weight:600">Advanced</summary>
+    <div style="margin-top:12px">
+      <div class="field">
+        <label for="serial">Device serial</label>
+        <input type="number" id="serial" min="1" max="16777215" step="1" style="max-width:180px">
+        <div class="help" id="serial-help"></div>
+      </div>
+      <div class="field">
+        <label class="check" style="margin-top:0"><input type="checkbox" id="grid_only"> Grid total comes only from this device</label>
+        <div class="help">Turn on once no other device has a Grid CT on the Zappi. The Zappi's grid total then gives a second phase feedback signal.</div>
+      </div>
+      <div class="field">
+        <label for="reference">Reference Harvi serial</label>
+        <input type="number" id="reference" min="0" max="16777215" step="1" style="max-width:180px">
+        <div class="help">Optional. With a working genuine Harvi still installed, enter its serial so the channel search listens for it instead of the Zappi. 0 for none.</div>
+      </div>
+    </div>
+  </details>
+
+  <div class="savebar">
+    <button class="primary" type="submit" id="save" disabled>Save</button>
+    <span class="small muted" id="save-note"></span>
+  </div>
+</form>
+
+<details class="card">
+  <summary>Radio channel</summary>
+  <div class="field">
+    <label for="channel">Receive channel</label>
+    <select id="channel" style="max-width:280px"></select>
+    <div class="help">Found automatically on first start. Search again if the Zappi was moved, or pick a channel if a neighbour's system is on another one.</div>
+  </div>
+  <button type="button" id="scan">Search for Zappi</button>
+</details>
+
+<details class="card">
+  <summary>Diagnostics</summary>
+  <div class="kv" id="diag"></div>
+</details>
+
+<details class="card">
+  <summary>Device</summary>
+  <div class="kv" id="device"></div>
+  <div class="actions" style="margin-top:14px">
+    <button type="button" id="restart">Restart</button>
+    <button type="button" class="danger" id="reset">Reset to factory settings</button>
+  </div>
+  <p class="small muted">Factory reset erases Wi-Fi and all settings, including a changed serial. The setup card's credentials still apply afterwards.</p>
+</details>
+
+<p class="small muted" style="text-align:center">Independent community project; not affiliated with or endorsed by myenergi.</p>
+</main>
+
+<div class="overlay hidden" id="overlay"><div class="card"><h2 id="overlay-title">Restarting…</h2><p class="muted" id="overlay-text">This page reconnects automatically.</p></div></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const INPUTS = [
+  {name: "Grid", ct: "CT1", role: "Grid", sign: "+ importing, − exporting", eg: "sensor.grid_power"},
+  {name: "Solar", ct: "CT2", role: "Generation", sign: "+ generating", eg: "sensor.solar_power"},
+  {name: "Battery", ct: "CT3", role: "AC Battery", sign: "+ discharging, − charging", eg: "sensor.battery_power"},
+];
+const CHANNELS = ["869.535", "869.555", "869.795", "869.901", "868.095", "868.232", "868.368", "868.505"];
+let S = null, dirty = false, busy = false, restartingSince = 0, autoToggle = false;
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const watts = w => w == null ? "—" : Math.abs(w) >= 10000 ? (w / 1000).toFixed(1) + " kW" : Math.round(w) + " W";
+const ago = s => s == null ? "" : s < 5 ? "just now" : s < 90 ? s + " s ago" : s < 5400 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago";
+const duration = s => s < 90 ? s + " s" : s < 5400 ? Math.round(s / 60) + " min" : s < 172800 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " days";
+
+async function api(command, body) {
+  const r = await fetch("/api/" + command, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  const j = await r.json().catch(() => ({ok: false, error: "Unexpected response (" + r.status + ")"}));
+  if (!j.ok) throw new Error(j.error || "Failed");
+  if (j.restarting) showRestart();
+  return j;
+}
+async function act(command, body, button) {
+  if (button) button.disabled = true;
+  try { await api(command, body); await poll(); }
+  catch (e) { alert(e.message); }
+  finally { if (button) button.disabled = false; }
+}
+function showRestart(title, text) {
+  restartingSince = Date.now();
+  $("overlay-title").textContent = title || "Restarting…";
+  $("overlay-text").textContent = text || "This page reconnects automatically, usually within 15 seconds.";
+  $("overlay").classList.remove("hidden");
+}
+
+function hero(s) {
+  const zs = s.zappi.serial;
+  const pair = ["Start pairing", () => act("pair", {}, null), true];
+  const H = {
+    starting: ["Starting up…", ""],
+    radio_fault: ["Radio fault", "The radio didn't start. Check that this is a LILYGO T3 LoRa32 V1.6.1 (868 MHz) board, then restart.", [["Restart", () => act("restart")]]],
+    scanning: ["Looking for your Zappi", `Listening on channel ${s.scan.step} of 8. This takes up to two minutes.`],
+    pairing: [`Pairing · ${s.pairing.left} s left`, `On the Zappi, open <b>Linked Devices → Pairing</b>, then select and confirm serial <b>${s.serial}</b>.`, [["Stop pairing", () => act("stop_pairing")]]],
+    no_channel: ["Zappi not found", "No Zappi was heard on any channel. Keep the antenna upright, move the device closer to the Zappi, then search again.", [["Search again", () => act("scan"), true]]],
+    unpaired: ["Pair with your Zappi", `The Zappi's channel is found. Start pairing, then on the Zappi open <b>Linked Devices → Pairing</b> and confirm serial <b>${s.serial}</b>.`, [pair]],
+    off: ["Ready", `Paired with Zappi ${zs}. Check the readings below, set the CT types on the Zappi (see the setup guide), then turn on <b>Send to Zappi</b>.`, [["Turn on Send to Zappi", () => act("output", {on: true}), true]]],
+    waiting_zappi: ["Waiting for the Zappi", `The Zappi hasn't listed serial ${s.serial} yet. If you haven't paired this device, pair it now.`, [pair]],
+    waiting_readings: ["Waiting for readings", "Measurements are held back until every configured reading is available. See the readings below."],
+    acquiring: ["Locking on to the Zappi", s.since > 90
+      ? "This is taking longer than usual. On the Zappi, check that this device's CT2 is set to <b>Generation</b> and is the only Generation CT."
+      : "Matching the Zappi's mains phase. This usually takes 10–45 seconds."],
+    holding: ["Live", "Feedback from the Zappi paused briefly; readings continue on the last phase for up to 15 seconds."],
+    live: ["Live", `The Zappi is receiving your readings${s.since > 60 ? " (for " + duration(s.since) + ")" : ""}. Compare its figures with your meter in both import and export.`],
+  }[s.state] || [s.status, ""];
+  $("hero-title").textContent = H[0];
+  $("hero-text").innerHTML = H[1];
+  const box = $("hero-actions"), key = s.state + (H[2] || []).map(a => a[0]).join();
+  if (box.dataset.key === key) return pillUpdate(s);
+  box.dataset.key = key;
+  box.replaceChildren(...(H[2] || []).map(([label, fn, primary]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = label; if (primary) b.className = "primary";
+    b.onclick = () => { b.disabled = true; fn(); };
+    return b;
+  }));
+  pillUpdate(s);
+}
+function pillUpdate(s) {
+  const pill = $("pill");
+  pill.textContent = s.status;
+  pill.className = "pill " + ({live: "live", holding: "live", radio_fault: "bad", no_channel: "warn", waiting_readings: "warn"}[s.state] || "");
+}
+
+function tiles(s) {
+  const push = s.inputs.source === "push";
+  $("tiles").innerHTML = s.inputs.channels.map((c, i) => {
+    const I = INPUTS[i];
+    let note = "", warn = false;
+    switch (c.state) {
+      case "unused": note = push ? "Not sent yet" : "Not used"; break;
+      case "waiting": note = c.subscribed ? "Waiting for Home Assistant" : "Restart to apply"; warn = true; break;
+      case "no_unit": note = "Unit unknown: choose W or kW"; warn = true; break;
+      case "bad_unit": note = `"${c.detected}" isn't a power unit`; warn = true; break;
+      case "stale": note = "Expired · last " + ago(c.age); warn = true; break;
+      default: note = (push ? "Pushed " : "Updated ") + ago(c.age);
+    }
+    if (c.state !== "unused" && !push && s.state !== "live") note = esc(c.entity) + " · " + note;
+    return `<div class="tile"><div class="label">${I.name} <span class="small">· ${I.ct}</span></div>`
+      + `<div class="value">${c.state === "unused" ? "—" : watts(c.w)}</div>`
+      + `<div class="note${warn ? " warn" : ""}">${warn ? note : esc(note)}</div></div>`;
+  }).join("");
+}
+
+function steps(s) {
+  const used = s.inputs.channels.some(c => c.state !== "unused");
+  const live = s.state === "live" || s.state === "holding";
+  const list = [
+    [s.channel >= 0, "Find the Zappi", "Done automatically on first start. Use <b>Radio channel</b> below to search again."],
+    [s.zappi.serial > 0, "Pair", `On the Zappi, open <b>Linked Devices → Pairing</b>. Press <b>Start pairing</b> here (or briefly press BOOT), then confirm serial <b>${s.serial}</b>.`],
+    [live, "Set this device's CT types on the Zappi",
+      `<table><tr><th>Reading</th><th>Sent as</th><th>Set on the Zappi</th><th>Sign</th></tr>${INPUTS.map(I => `<tr><td>${I.name}</td><td>${I.ct}</td><td>${I.role}</td><td>${I.sign}</td></tr>`).join("")}</table>`
+      + `<p class="small muted">CT2 must be Generation, and the only Generation CT on that Zappi: its total is the device's phase feedback. Remove the Grid role from any other Grid CT. For the app's solar and battery bubbles, this must be the Zappi's only Harvi (see Advanced → Device serial).</p>`],
+    [used && s.inputs.usable, "Connect your power readings", "Below, choose where readings come from and fill in each one you have. Use <b>Invert sign</b> if a reading has the opposite sign to the table."],
+    [s.output, "Turn on Send to Zappi", "Then compare the Zappi's grid figure with your meter, in both import and export."],
+  ];
+  const first = list.findIndex(x => !x[0]);
+  $("steps").innerHTML = list.map(([done, title, text], i) =>
+    `<li class="${done ? "done" : i === first ? "now" : ""}"><div class="dot">${done ? "✓" : i + 1}</div><div><b>${title}</b><div class="small muted">${text}</div></div></li>`).join("");
+  const card = $("setup-card");
+  if (!card.dataset.touched && card.open === live) { autoToggle = true; card.open = !live; }
+}
+
+function rows() {
+  $("rows").innerHTML = INPUTS.map((I, i) => `<div class="input-row">
+    <div class="head"><b>${I.name} <span class="small muted">→ ${I.ct}, ${I.role}</span></b><span>${I.sign}</span></div>
+    <div class="fields ha-only">
+      <input type="text" id="entity${i}" placeholder="${I.eg}" aria-label="${I.name} entity ID" spellcheck="false" autocapitalize="off">
+      <select id="unit${i}" aria-label="${I.name} unit"><option value="Auto">Auto</option><option>W</option><option>kW</option></select>
+    </div>
+    <label class="check"><input type="checkbox" id="invert${i}"> Invert sign</label>
+  </div>`).join("");
+}
+
+function fillForm(s) {
+  const push = s.inputs.source === "push";
+  $(push ? "src-push" : "src-ha").checked = true;
+  s.inputs.channels.forEach((c, i) => {
+    $("entity" + i).value = c.entity; $("unit" + i).value = c.unit; $("invert" + i).checked = c.invert;
+  });
+  $("timeout").value = s.inputs.timeout;
+  $("serial").value = s.serial;
+  $("reference").value = s.reference;
+  $("grid_only").checked = s.grid_only;
+  sourceView();
+}
+function sourceView() {
+  const push = $("src-push").checked;
+  document.querySelectorAll(".ha-only").forEach(e => e.classList.toggle("hidden", push));
+  document.querySelectorAll(".push-only").forEach(e => e.classList.toggle("hidden", !push));
+  $("source-help").textContent = push
+    ? "Another device or script sends readings to this device over your network. No Home Assistant needed."
+    : "Enter the Home Assistant entity ID of each reading you have (find it in the entity's settings). Leave a reading blank if you don't have it. Auto takes W or kW from the entity.";
+}
+function formBody() {
+  return {
+    source: $("src-push").checked ? "push" : "ha",
+    channels: INPUTS.map((_, i) => ({entity: $("entity" + i).value.trim(), unit: $("unit" + i).value, invert: $("invert" + i).checked})),
+    timeout: +$("timeout").value, serial: +$("serial").value, reference: +$("reference").value, grid_only: $("grid_only").checked,
+  };
+}
+function setDirty(v) {
+  dirty = v; $("save").disabled = !v;
+  $("save-note").textContent = v ? "Unsaved changes" : "";
+}
+
+function pushHelp(s) {
+  const host = location.host;
+  $("curl").textContent = `curl -X POST http://${host}/api/power \\\n  -d key=SETUP_PASSWORD -d grid=1520 -d solar=2310 -d battery=-400`;
+  $("shelly").textContent = `// Replace SETUP_PASSWORD with the password on the setup card.
+Timer.set(2000, true, function () {
+  let em = Shelly.getComponentStatus("em", 0);
+  HTTP.POST("http://${host}/api/power?key=SETUP_PASSWORD",
+    JSON.stringify({grid: em.total_act_power}), function () {});
+}, null);`;
+}
+
+function kv(el, pairs) {
+  el.innerHTML = pairs.filter(p => p[1] !== undefined && p[1] !== null && p[1] !== "").map(([k, v]) => `<div>${k}</div><div>${esc(v)}</div>`).join("");
+}
+function details(s) {
+  const p = s.phase, r = s.radio;
+  kv($("diag"), [
+    ["Status", s.status + " for " + duration(s.since)],
+    ["Last event", s.notice ? s.notice + " (" + ago(s.notice_age) + ")" : null],
+    ["Zappi serial", s.zappi.serial || "not heard yet"],
+    ["Phase", p.locked ? "locked" : p.holding ? "holding" : "not locked"],
+    ["Phase uncertainty", p.sigma != null ? p.sigma.toFixed(1) + "°" : null],
+    ["Fit gain", p.gain != null ? p.gain.toFixed(3) + " (≈1.00 is right)" : null],
+    ["Tracked mains", p.hz != null ? p.hz.toFixed(4) + " Hz" : null],
+    ["Phase observations", p.observations],
+    ["Radio noise floor", r.noise != null ? r.noise.toFixed(1) + " dBm" : null],
+    ["Packets received", r.rx + (r.harvi_rx ? ` (${r.harvi_rx} from a Harvi)` : "")],
+    ["Receiver restarts", r.restarts],
+    ["CT packets sent", `${r.ct_sent} (held ${r.ct_held}, late ${r.ct_late}, failed ${r.ct_failed})`],
+    ["Ambiguous reports", r.ambiguous],
+    ["Pairing packets", `${r.pairing_sent} sent, ${r.pairing_failed} failed`],
+    ["Last packet", r.last_packet],
+    ["Last Harvi packet", r.last_harvi],
+  ]);
+  kv($("device"), [
+    ["Name", s.name],
+    ["Serial", s.serial + (s.serial !== s.built_in_serial ? ` (built-in ${s.built_in_serial})` : "")],
+    ["Firmware", s.version],
+    ["IP address", s.network.ip],
+    ["Wi-Fi signal", s.network.rssi != null ? Math.round(s.network.rssi) + " dBm" : null],
+    ["Home Assistant", s.network.ha ? "connected" : "not connected"],
+    ["Up for", duration(s.uptime)],
+  ]);
+}
+
+function render(s) {
+  S = s;
+  $("sub").textContent = `Serial ${s.serial}`;
+  hero(s); tiles(s); steps(s); details(s);
+  const n = $("notice");
+  n.textContent = s.notice; n.classList.toggle("hidden", !s.notice || s.notice_age > 120 || ["Listening", "Restarting"].includes(s.notice));
+  const out = $("output");
+  if (!busy) out.checked = s.output;
+  $("output-note").textContent = s.output
+    ? (s.state === "live" ? "Sending live readings." : "On. " + s.status + ".")
+    : "Off. The Zappi receives nothing from this device.";
+  const ch = $("channel");
+  if (document.activeElement !== ch) ch.value = s.channel;
+  $("scan").disabled = s.scan.active;
+  $("serial-help").textContent = `Built-in serial: ${s.built_in_serial}. To replace a genuine Harvi and get the myenergi app's solar and battery bubbles, enter the retired Harvi's serial (on its label), unclip all of its CT clamps for good, remove every Harvi from the Zappi's Linked Devices, then pair again. Never use a serial another working device still transmits.`;
+  if (!dirty) fillForm(s);
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/status", {cache: "no-store"});
+    if (!r.ok) throw new Error(r.status);
+    const s = await r.json();
+    $("offline").classList.add("hidden");
+    if (restartingSince && Date.now() - restartingSince > 2500) { restartingSince = 0; $("overlay").classList.add("hidden"); }
+    render(s);
+  } catch (e) {
+    if (!restartingSince) $("offline").classList.remove("hidden");
+  }
+}
+
+rows();
+$("channel").innerHTML = '<option value="-1" disabled>Not found yet</option>' + CHANNELS.map((f, i) => `<option value="${i}">Channel ${i + 1} · ${f} MHz</option>`).join("");
+pushHelp();
+document.querySelectorAll('input[name=source]').forEach(e => e.addEventListener("change", sourceView));
+$("settings").addEventListener("input", () => setDirty(true));
+$("settings").addEventListener("change", () => setDirty(true));
+$("settings").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const body = formBody();
+  if (S && body.serial !== S.serial &&
+      !confirm(`Change this device's serial from ${S.serial} to ${body.serial}? You'll need to pair it with the Zappi again.`)) return;
+  $("save").disabled = true;
+  try {
+    const j = await api("settings", body);
+    setDirty(false);
+    $("save-note").textContent = j.restarting ? "" : "Saved";
+    await poll();
+  } catch (e) { $("save-note").textContent = e.message; $("save").disabled = false; }
+});
+$("output").addEventListener("change", async e => {
+  busy = true;
+  try { await api("output", {on: e.target.checked}); await poll(); }
+  catch (err) { alert(err.message); e.target.checked = !e.target.checked; }
+  finally { busy = false; }
+});
+$("channel").addEventListener("change", e => act("channel", {channel: +e.target.value}));
+$("scan").addEventListener("click", e => act("scan", {}, e.target));
+$("restart").addEventListener("click", e => act("restart", {}, e.target));
+$("reset").addEventListener("click", e => {
+  if (confirm("Erase Wi-Fi and all settings? The device restarts into Wi-Fi setup."))
+    api("factory_reset").then(() => showRestart("Reset to factory settings", "Join the setup Wi-Fi network on the card to set the device up again.")).catch(err => alert(err.message));
+});
+$("setup-card").addEventListener("toggle", e => { if (autoToggle) autoToggle = false; else e.target.dataset.touched = 1; });
+poll();
+setInterval(() => { if (!document.hidden) poll(); }, 1500);
+</script>
+</body>
+</html>

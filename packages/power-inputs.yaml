@@ -1,80 +1,199 @@
-# Restore settings before native HA subscriptions are set up (priority 100).
+# The three readings sent as CT1-CT3: grid, solar and battery, in W. They come
+# from Home Assistant entities, or are pushed over HTTP (POST /api/power) by
+# another device or script, so the board also works without Home Assistant.
+# All settings are edited on the device's web page.
 esphome:
   on_boot:
+    # Before native HA subscriptions are set up (priority 100).
     - priority: 550
       then:
         - lambda: |-
-            id(active_scale_1) = (id(source_1_units).current_option() == "kW" ? 1000.0f : 1.0f) *
-                (id(source_1_sign).current_option() == "Inverted" ? -1.0f : 1.0f);
-            id(active_source_1) = id(source_1).state;
-            if (!harvi::valid_entity_id(id(active_source_1))) id(active_source_1).clear();
-            id(input_freshness).set_enabled(0, !id(active_source_1).empty());
-            if (id(active_source_1).empty()) id(active_source_1) = "sensor.unconfigured_input_1";
-            id(power_input_1).set_entity_id(id(active_source_1).c_str());
-            id(active_scale_2) = (id(source_2_units).current_option() == "kW" ? 1000.0f : 1.0f) *
-                (id(source_2_sign).current_option() == "Inverted" ? -1.0f : 1.0f);
-            id(active_source_2) = id(source_2).state;
-            if (!harvi::valid_entity_id(id(active_source_2))) id(active_source_2).clear();
-            id(input_freshness).set_enabled(1, !id(active_source_2).empty());
-            if (id(active_source_2).empty()) id(active_source_2) = "sensor.unconfigured_input_2";
-            id(power_input_2).set_entity_id(id(active_source_2).c_str());
-            id(active_scale_3) = (id(source_3_units).current_option() == "kW" ? 1000.0f : 1.0f) *
-                (id(source_3_sign).current_option() == "Inverted" ? -1.0f : 1.0f);
-            id(active_source_3) = id(source_3).state;
-            if (!harvi::valid_entity_id(id(active_source_3))) id(active_source_3).clear();
-            id(input_freshness).set_enabled(2, !id(active_source_3).empty());
-            if (id(active_source_3).empty()) id(active_source_3) = "sensor.unconfigured_input_3";
-            id(power_input_3).set_entity_id(id(active_source_3).c_str());
+            static const char *const placeholder[] = {"sensor.unconfigured_input_1",
+                "sensor.unconfigured_input_2", "sensor.unconfigured_input_3"};
+            text::Text *sources[] = {id(source_1), id(source_2), id(source_3)};
+            sensor::Sensor *values[] = {id(power_input_1), id(power_input_2), id(power_input_3)};
+            text_sensor::TextSensor *units[] = {id(power_unit_1), id(power_unit_2), id(power_unit_3)};
+            for (size_t i = 0; i < 3; ++i) {
+              auto &entity = id(active_sources)[i];
+              entity = sources[i]->state;
+              if (entity.empty() || !harvi::valid_entity_id(entity)) entity = placeholder[i];
+              static_cast<homeassistant::HomeassistantSensor *>(values[i])->set_entity_id(entity.c_str());
+              static_cast<homeassistant::HomeassistantTextSensor *>(units[i])->set_entity_id(entity.c_str());
+            }
+            id(apply_input_settings).execute();
+
 globals:
-  - id: active_scale_1
-    type: float
-    initial_value: "1"
-  - id: active_source_1
-    type: std::string
-  - id: active_scale_2
-    type: float
-    initial_value: "1"
-  - id: active_source_2
-    type: std::string
-  - id: active_scale_3
-    type: float
-    initial_value: "1"
-  - id: active_source_3
-    type: std::string
+  - id: inputs
+    type: harvi::PowerInputs
+  # Entity IDs subscribed at boot; the HA subscriptions keep these pointers.
+  - id: active_sources
+    type: std::array<std::string, 3>
+
+script:
+  # Unit, sign and source changes apply immediately; entity changes need a
+  # restart because Home Assistant subscriptions are made at boot.
+  - id: apply_input_settings
+    then:
+      - lambda: |-
+          auto &in = id(inputs);
+          in.push_source = id(input_source).current_option() == std::string("HTTP push");
+          text::Text *sources[] = {id(source_1), id(source_2), id(source_3)};
+          select::Select *units[] = {id(source_1_units), id(source_2_units), id(source_3_units)};
+          select::Select *signs[] = {id(source_1_sign), id(source_2_sign), id(source_3_sign)};
+          for (size_t i = 0; i < 3; ++i) {
+            const std::string unit = units[i]->current_option();
+            const float scale = unit == "W" ? 1.0f : unit == "kW" ? 1000.0f : 0.0f;
+            // Used only once its entity is subscribed (after a restart).
+            const bool subscribed = !sources[i]->state.empty() && id(active_sources)[i] == sources[i]->state;
+            in.configure(i, subscribed, scale, signs[i]->current_option() == std::string("Inverted"));
+          }
+
 sensor:
   - platform: homeassistant
     id: power_input_1
     entity_id: sensor.unconfigured_input_1
-    name: Power Input 1
-    internal: false
-    unit_of_measurement: W
-    device_class: power
-    state_class: measurement
-    filters:
-      - lambda: return x * id(active_scale_1);
+    internal: true
     on_value:
-      - lambda: id(input_freshness).observe(0, millis(), x);
+      - lambda: id(inputs).observe(0, millis(), x);
   - platform: homeassistant
     id: power_input_2
     entity_id: sensor.unconfigured_input_2
-    name: Power Input 2
-    internal: false
-    unit_of_measurement: W
-    device_class: power
-    state_class: measurement
-    filters:
-      - lambda: return x * id(active_scale_2);
+    internal: true
     on_value:
-      - lambda: id(input_freshness).observe(1, millis(), x);
+      - lambda: id(inputs).observe(1, millis(), x);
   - platform: homeassistant
     id: power_input_3
     entity_id: sensor.unconfigured_input_3
-    name: Power Input 3
-    internal: false
-    unit_of_measurement: W
-    device_class: power
-    state_class: measurement
-    filters:
-      - lambda: return x * id(active_scale_3);
+    internal: true
     on_value:
-      - lambda: id(input_freshness).observe(2, millis(), x);
+      - lambda: id(inputs).observe(2, millis(), x);
+
+text_sensor:
+  # Each entity's unit, so W and kW sources need no setting.
+  - platform: homeassistant
+    id: power_unit_1
+    entity_id: sensor.unconfigured_input_1
+    attribute: unit_of_measurement
+    internal: true
+    on_value:
+      - lambda: id(inputs).observe_unit(0, x);
+  - platform: homeassistant
+    id: power_unit_2
+    entity_id: sensor.unconfigured_input_2
+    attribute: unit_of_measurement
+    internal: true
+    on_value:
+      - lambda: id(inputs).observe_unit(1, x);
+  - platform: homeassistant
+    id: power_unit_3
+    entity_id: sensor.unconfigured_input_3
+    attribute: unit_of_measurement
+    internal: true
+    on_value:
+      - lambda: id(inputs).observe_unit(2, x);
+
+# Settings. Names are kept from earlier releases so saved values survive
+# updates (the saved-value key derives from the name).
+select:
+  - platform: template
+    id: input_source
+    name: Input Source
+    internal: true
+    options: [Home Assistant, HTTP push]
+    optimistic: true
+    restore_value: true
+    initial_option: Home Assistant
+  # "Auto" is last so that saved W/kW choices keep their index.
+  - platform: template
+    id: source_1_units
+    name: Power 1 Source Unit
+    internal: true
+    options: [W, kW, Auto]
+    optimistic: true
+    restore_value: true
+    initial_option: Auto
+  - platform: template
+    id: source_2_units
+    name: Power 2 Source Unit
+    internal: true
+    options: [W, kW, Auto]
+    optimistic: true
+    restore_value: true
+    initial_option: Auto
+  - platform: template
+    id: source_3_units
+    name: Power 3 Source Unit
+    internal: true
+    options: [W, kW, Auto]
+    optimistic: true
+    restore_value: true
+    initial_option: Auto
+  - platform: template
+    id: source_1_sign
+    name: Power 1 Sign
+    internal: true
+    options: [As received, Inverted]
+    optimistic: true
+    restore_value: true
+    initial_option: As received
+  - platform: template
+    id: source_2_sign
+    name: Power 2 Sign
+    internal: true
+    options: [As received, Inverted]
+    optimistic: true
+    restore_value: true
+    initial_option: As received
+  - platform: template
+    id: source_3_sign
+    name: Power 3 Sign
+    internal: true
+    options: [As received, Inverted]
+    optimistic: true
+    restore_value: true
+    initial_option: As received
+
+text:
+  - platform: template
+    id: source_1
+    name: Power 1 Entity
+    internal: true
+    mode: text
+    max_length: 128
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+  - platform: template
+    id: source_2
+    name: Power 2 Entity
+    internal: true
+    mode: text
+    max_length: 128
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+  - platform: template
+    id: source_3
+    name: Power 3 Entity
+    internal: true
+    mode: text
+    max_length: 128
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+
+number:
+  # With HTTP push, a reading older than this counts as lost and all
+  # measurements are withheld. Home Assistant only resends changed values, so
+  # it does not apply there.
+  - platform: template
+    id: input_timeout
+    name: Input Receipt Timeout
+    internal: true
+    unit_of_measurement: s
+    min_value: 5
+    max_value: 3600
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 30
