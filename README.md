@@ -394,10 +394,13 @@ moment the packet arrives. It predicts the phase as follows:
   lists this device's virtual serial number, and ignores broadcasts from
   neighboring installations.
 - **Pilot:** CT2 always carries an extra 300 W signal, called the pilot, at
-  90° ± 3° to its measurement. When the phase is locked, the pilot shifts the
-  generation reading by about ±16 W. Any phase error appears in the generation
+  78° ± 3° to its measurement. Any phase error appears in the generation
   total, so the device can track the phase even at night, when there's no
-  solar generation.
+  solar generation. The pilot adds about 60 W of real power, and the device
+  subtracts that from solar. So generation reads accurately once solar is
+  above about 60 W, and reads about 60 W at night instead of jittering below
+  0 W, which the myenergi app would show as power flowing back into
+  generation.
 - **Acquisition:** to find the phase, the device runs a least-squares fit,
   which finds the phase and frequency that best match the feedback, across
   mains frequencies. Between packets, it steps the sent angle by the

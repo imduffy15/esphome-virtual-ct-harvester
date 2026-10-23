@@ -298,11 +298,15 @@ class PhaseTracker {
 #ifndef HARVI_FREQ_NOISE
 #define HARVI_FREQ_NOISE 0.0016  // measured mains wander in the ESP32 clock
 #define HARVI_PHASE_NOISE 1.0
-#define HARVI_MEAS_SIGMA 0.03
+// Zappi reading noise: a ~15 W floor plus 1 % of magnitude. Measured
+// residuals were 11-15 W (median) from the 300 W pilot alone up to 1.9 kW of
+// solar; a pure percentage model starves the filter at high solar.
+#define HARVI_MEAS_SIGMA 0.01
+#define HARVI_MEAS_ABS_W 15.0
 #define HARVI_PILOT_SKEW 3.0f
 #endif
   static constexpr double FREQ_NOISE = HARVI_FREQ_NOISE, PHASE_NOISE = HARVI_PHASE_NOISE,
-                          MEAS_SIGMA = HARVI_MEAS_SIGMA;
+                          MEAS_SIGMA = HARVI_MEAS_SIGMA, MEAS_ABS_W = HARVI_MEAS_ABS_W;
   bool tracking() const { return tracking_; }
   double phase_sigma_deg() const { return std::sqrt(p_[0][0]); }
   // Phase uncertainty propagated (without measurements) to t_us.
@@ -339,7 +343,8 @@ class PhaseTracker {
     const double x = (o.angle_deg - phi_) * M_PI / 180.0;
     const double z = std::max(-1.3, std::min(1.3, double(o.reported_w) / o.magnitude_w));
     const double y = z - std::cos(x), hd = std::sin(x) * M_PI / 180.0;
-    const double s = hd * hd * p_[0][0] + MEAS_SIGMA * MEAS_SIGMA;
+    const double abs_z = MEAS_ABS_W / o.magnitude_w;
+    const double s = hd * hd * p_[0][0] + MEAS_SIGMA * MEAS_SIGMA + abs_z * abs_z;
     const double nis = y * y / s;
     if (nis > 16.0) return -nis;
     const double k0 = p_[0][0] * hd / s, k1 = p_[1][0] * hd / s;
@@ -396,6 +401,12 @@ class VirtualCT {
   static constexpr uint32_t RIDE_US = 15000000;
   static constexpr double RIDE_SIGMA_DEG = 25.0;
   static constexpr float PILOT_W = 300.0f, PILOT_SKEW_DEG = HARVI_PILOT_SKEW;
+  // The pilot sits PILOT_BIAS_DEG short of quadrature, so it adds ~+62 W of
+  // real power that phase jitter cannot pull below zero: generation does not
+  // read negative while locked. The bias is subtracted from the measurement
+  // (floored at 0), so the reading is exact once solar exceeds it and shows
+  // the bias as generation only below that (at night).
+  static constexpr float PILOT_BIAS_DEG = 12.0f;
   struct Sent {
     uint32_t t_us{0};
     std::array<float, 3> angle_deg{}, magnitude_w{};
@@ -563,6 +574,8 @@ class VirtualCT {
     const bool live = output || ride;
     const double value_base = output ? base : ride ? hold_.predict(at_us) : base;
     const float skew = (sequence_ & 1) ? PILOT_SKEW_DEG : -PILOT_SKEW_DEG;
+    const double pilot_deg = 90.0 - PILOT_BIAS_DEG + skew;  // relative to base
+    const double pilot_real_w = PILOT_W * std::cos(pilot_deg * M_PI / 180.0);
     Packet p;
     p.serial = SERIAL;
     p.sequence = sequence_++;
@@ -581,11 +594,12 @@ class VirtualCT {
       // meaningless reading stays within +/-PILOT_W.
       double re = 0, im = 0;
       if (known && live) {
-        re += watts[i] * std::cos(value_base * M_PI / 180.0);
-        im += watts[i] * std::sin(value_base * M_PI / 180.0);
+        const double w = int8_t(i) == generation_ct ? std::max(watts[i] - pilot_real_w, 0.0) : watts[i];
+        re += w * std::cos(value_base * M_PI / 180.0);
+        im += w * std::sin(value_base * M_PI / 180.0);
       }
       if (int8_t(i) == generation_ct) {
-        const double q = (base + 90.0 + skew) * M_PI / 180.0;
+        const double q = (base + pilot_deg) * M_PI / 180.0;
         re += PILOT_W * std::cos(q);
         im += PILOT_W * std::sin(q);
       } else if (!known || (gate_outputs && !live)) {
