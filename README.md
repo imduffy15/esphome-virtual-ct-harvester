@@ -434,7 +434,9 @@ moment the packet arrives. It predicts the phase as follows:
 - If the device stops transmitting, the Zappi keeps the last values for at
   least 34 seconds, then clears them.
 - Each packet takes about 4 ms of airtime. The device sends one packet every
-  1–3 seconds, at a transmit power of 2 decibel-milliwatts (dBm).
+  1–3 seconds, at a transmit power of 14 decibel-milliwatts (dBm). At 2 dBm the
+  Zappi missed most packets for over an hour when the path weakened by about
+  3 dB.
 
 ### Known limitations
 
@@ -625,7 +627,8 @@ the radio's interrupt line. SDA and SCL are the I²C data and clock lines.
 
 - The radio uses frequency-shift keying (FSK), not LoRa (long range)
   modulation.
-- All transmissions use 2 dBm.
+- All transmissions use 14 dBm (25 mW), well inside the 500 mW the
+  869.40–869.65 MHz sub-band allows.
 - GPIO5 is a strapping pin, which the ESP32 reads at startup to choose its boot
   mode. The manufacturer wires it to the radio. Don't connect other loads to
   it, because they can affect startup.

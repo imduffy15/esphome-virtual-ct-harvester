@@ -205,11 +205,13 @@ sx127x:
   preamble_errors: 10
   preamble_polarity: 0xAA
   rx_start: true
-  # Transmit power is 2 dBm. Pairing sends one packet every 2 s for 120 s.
+  # Transmit power is 14 dBm (25 mW; the 869.40-869.65 MHz sub-band allows
+  # 500 mW at 10 % duty). Pairing sends one packet every 2 s for 120 s.
   # Virtual CT output sends one packet of about 4 ms for each Zappi status
-  # heard (about one every 1-3 s).
+  # heard (about 0.4 % duty). At 2 dBm a path change of about 3 dB stopped the
+  # Zappi taking up most packets for over an hour.
   pa_pin: BOOST
-  pa_power: 2
+  pa_power: 14
   on_packet:
     then:
       - lambda: |-
