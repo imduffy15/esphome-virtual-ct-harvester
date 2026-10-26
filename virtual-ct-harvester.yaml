@@ -78,6 +78,10 @@ api:
     - lambda: id(inputs).reset();
 
 # Updates are encrypted and authenticated with the API encryption key.
+# Reports why the board last restarted.
+debug:
+  update_interval: 3600s
+
 ota:
   - platform: esphome
     encryption: {}
@@ -173,6 +177,9 @@ sensor:
       return -0.5f * id(radio).diagnostic_register(0x11);
 
 text_sensor:
+  - platform: debug
+    reset_reason:
+      name: Reset reason
   - platform: template
     id: last_packet
     name: Last radio packet
